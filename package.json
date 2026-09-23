@@ -28,6 +28,7 @@
     "db:studio": "prisma studio"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.1.2",
     "prisma": "7.10.0",
     "typescript": "~5.9.3"

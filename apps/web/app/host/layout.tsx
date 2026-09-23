@@ -3,7 +3,7 @@
 import { type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AuthProvider, useAuth } from "../../components/auth";
+import { useAuth } from "../../components/auth";
 import { api } from "../../lib/api";
 
 function HostNav() {
@@ -40,11 +40,9 @@ function HostNav() {
 
 export default function HostLayout({ children }: { children: ReactNode }) {
   return (
-    <AuthProvider>
-      <div className="min-h-screen">
-        <HostNav />
-        <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
-      </div>
-    </AuthProvider>
+    <div className="min-h-screen">
+      <HostNav />
+      <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+    </div>
   );
 }
