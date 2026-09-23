@@ -1,4 +1,5 @@
 import type { FastifyReply } from "fastify";
+import { z } from "zod";
 
 /** Error codes shared between REST and WebSocket surfaces. */
 export type ErrorCode =
@@ -31,6 +32,34 @@ export class AppError extends Error {
     super(message);
     this.name = "AppError";
   }
+}
+
+/** Parse/validate with a zod schema, mapping failures to a 400 AppError. */
+export function parseWith<TSchema extends z.ZodType>(schema: TSchema, value: unknown): z.infer<TSchema> {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      result.error.issues[0]?.message ?? "Invalid input",
+      400,
+    );
+  }
+  return result.data;
+}
+
+/** Prisma error code helpers (driver adapters surface PrismaError.code). */
+export function prismaCode(e: unknown): string | undefined {
+  if (e && typeof e === "object") {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+  return undefined;
+}
+export function isUniqueViolation(e: unknown): boolean {
+  return prismaCode(e) === "P2002";
+}
+export function isForeignKeyViolation(e: unknown): boolean {
+  return prismaCode(e) === "P2003";
 }
 
 export const errors = {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import "./env-loader.js";
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(["development", "staging", "production"]).default("development"),
+  NODE_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
   LOG_LEVEL: z.string().default("info"),
 
   API_PORT: z.coerce.number().int().positive().default(3001),

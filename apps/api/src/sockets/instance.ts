@@ -1,4 +1,4 @@
-import type { IoServer } from "./index.js";
+import type { Server as IoServer } from "socket.io";
 
 let io: IoServer | undefined;
 

@@ -1,10 +1,13 @@
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import { getConfig } from "./config.js";
 import { getLogger } from "./logging/logger.js";
 import { sendError } from "./errors/index.js";
 import { healthRoutes } from "./routes/health.js";
+import { authPlugin } from "./auth/plugin.js";
+import { authRoutes } from "./routes/auth.routes.js";
+import { quizRoutes } from "./routes/quizzes.routes.js";
 
 export interface BuildAppOptions {
   /** Skip plugins/behaviors that need external services. Defaults to false. */
@@ -14,7 +17,7 @@ export interface BuildAppOptions {
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = getConfig();
   const app = Fastify({
-    loggerInstance: getLogger(),
+    loggerInstance: getLogger() as FastifyBaseLogger,
     trustProxy: true,
     bodyLimit: 64 * 1024,
   });
@@ -31,6 +34,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   }
 
   await app.register(healthRoutes, { prefix: "/api" });
+
+  await app.register(authPlugin);
+  await app.register(authRoutes, { prefix: "/api" });
+  await app.register(quizRoutes, { prefix: "/api" });
 
   app.setErrorHandler((err, req, reply) => {
     const fastifyErr = err as FastifyError;
