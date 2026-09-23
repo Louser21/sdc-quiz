@@ -1,0 +1,166 @@
+// Quiz Platform schema - PostgreSQL
+// Generator: new-style `prisma-client` (outputs TS sources into apps/api/src/generated)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../apps/api/src/generated/prisma"
+  runtime  = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  HOST
+  ADMIN
+}
+
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum GameSessionStatus {
+  CREATED
+  ACTIVE
+  FINISHED
+  ABANDONED
+}
+
+enum PlayerStatus {
+  ACTIVE
+  DISCONNECTED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(HOST)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  quizzes      Quiz[]
+  sessions     Session[]
+  gameSessions GameSession[]
+}
+
+model Quiz {
+  id          String    @id @default(uuid())
+  title       String
+  description String    @default("")
+  status      QuizStatus @default(DRAFT)
+  creatorId   String
+  creator     User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  questions    Question[]
+  gameSessions GameSession[]
+
+  @@index([creatorId])
+}
+
+model Question {
+  id        String   @id @default(uuid())
+  quizId    String
+  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  text      String
+  position  Int
+  timeLimit Int      @default(20)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  options Option[]
+  answers Answer[]
+
+  @@index([quizId, position])
+}
+
+model Option {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  text       String
+  position   Int
+  isCorrect  Boolean  @default(false)
+
+  @@index([questionId])
+}
+
+model GameSession {
+  id        String            @id @default(uuid())
+  quizId    String
+  quiz      Quiz              @relation(fields: [quizId], references: [id], onDelete: Restrict)
+  joinCode  String            @unique
+  status    GameSessionStatus @default(CREATED)
+  hostId    String
+  host      User              @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime          @default(now())
+
+  players Player[]
+  answers Answer[]
+
+  @@index([quizId])
+  @@index([hostId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Player {
+  id         String       @id @default(uuid())
+  gameId     String
+  game       GameSession  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  sessionId  String       @unique
+  nickname   String
+  score      Int          @default(0)
+  status     PlayerStatus @default(ACTIVE)
+  joinedAt   DateTime     @default(now())
+  lastSeenAt DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+
+  answers Answer[]
+
+  @@unique([gameId, nickname])
+  @@index([gameId])
+}
+
+model Answer {
+  id          String   @id @default(uuid())
+  gameId      String
+  game        GameSession @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  playerId    String
+  player      Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    Question   @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  optionId    String
+  isCorrect   Boolean
+  points      Int
+  submittedAt DateTime
+  createdAt   DateTime   @default(now())
+
+  @@unique([gameId, playerId, questionId])
+  @@index([gameId, questionId])
+  @@index([playerId])
+}
+
+// Host authentication sessions (token stored as sha256 hash, never plaintext)
+model Session {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+  revokedAt   DateTime?
+  ip          String?
+  userAgent   String?
+
+  @@index([userId])
+}

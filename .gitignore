@@ -1,0 +1,42 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# generated
+apps/api/src/generated/
+prisma/generated/
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+k6-results/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+logs/
+
+# editor / os
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# docker
+postgres-data/
+redis-data/

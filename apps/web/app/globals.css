@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+:root {
+  --brand: #7c3aed;
+  --brand-dark: #6d28d9;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-100 antialiased;
+}
+
+@layer base {
+  button,
+  a {
+    @apply transition-colors;
+  }
+}

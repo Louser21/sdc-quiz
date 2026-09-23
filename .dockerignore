@@ -1,0 +1,16 @@
+node_modules
+dist
+.next
+.git
+.env
+.env.*
+docs
+load-tests
+e2e
+coverage
+playwright-report
+test-results
+*.log
+.gitignore
+docker-compose*.yml
+Makefile
