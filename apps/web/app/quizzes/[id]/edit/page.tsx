@@ -48,9 +48,12 @@ export default function QuizEditorPage() {
       // Locally-dirty questions are kept as-is unless they were the very
       // question just saved (then the server copy, complete with its real id,
       // replaces them — otherwise a freshly-saved question would duplicate).
+      // The saved-key is captured BEFORE the updater runs: React StrictMode
+      // invokes state updaters twice in dev, and the updater must not consume
+      // the ref or the second pass would re-append the just-saved question.
+      const savedKey = savedKeyRef.current;
+      savedKeyRef.current = null;
       setQuestions((current) => {
-        const savedKey = savedKeyRef.current;
-        savedKeyRef.current = null;
         const localById = new Map(current.filter((q) => q.id).map((q) => [q.id, q]));
         return [
           ...res.quiz.questions.map((q) => {
