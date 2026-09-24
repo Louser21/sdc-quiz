@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { OptionViewDto, QuestionViewDto, QuizDetailDto } from "@quiz/shared";
@@ -11,6 +11,8 @@ import { HostChrome } from "../../../../components/chrome";
 
 interface EditorQuestion extends QuestionViewDto {
   dirty: boolean;
+  /** Stable local identity so unsaved questions survive server reloads. */
+  _key: number;
 }
 
 function blankOption(): OptionViewDto {
@@ -30,6 +32,8 @@ export default function QuizEditorPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const nextKey = useRef(0);
+  const savedKeyRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,9 +44,23 @@ export default function QuizEditorPage() {
       setDescription(res.quiz.description ?? "");
       setTimeLimitSeconds(res.quiz.timeLimitSeconds);
       setStatus(res.quiz.status);
-      setQuestions(
-        res.quiz.questions.map((q) => ({ ...q, dirty: false })),
-      );
+      // Soft reload: adopt server truth without discarding local unsaved work.
+      // Locally-dirty questions are kept as-is unless they were the very
+      // question just saved (then the server copy, complete with its real id,
+      // replaces them — otherwise a freshly-saved question would duplicate).
+      setQuestions((current) => {
+        const savedKey = savedKeyRef.current;
+        savedKeyRef.current = null;
+        const localById = new Map(current.filter((q) => q.id).map((q) => [q.id, q]));
+        return [
+          ...res.quiz.questions.map((q) => {
+            const local = localById.get(q.id);
+            if (local && local.dirty && local._key !== savedKey) return local;
+            return { ...q, dirty: false, _key: nextKey.current++ };
+          }),
+          ...current.filter((q) => !q.id && q._key !== savedKey),
+        ];
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load quiz");
     } finally {
@@ -122,6 +140,7 @@ export default function QuizEditorPage() {
     setSaving(true);
     setError(null);
     try {
+      savedKeyRef.current = q._key;
       if (q.id) {
         await api(`/api/questions/${q.id}`, { method: "PATCH", body: JSON.stringify(body) });
       } else {
@@ -177,7 +196,14 @@ export default function QuizEditorPage() {
   function addQuestion() {
     setQuestions((qs) => [
       ...qs,
-      { id: "", text: "", position: qs.length, options: [blankOption(), blankOption()], dirty: false },
+      {
+        id: "",
+        text: "",
+        position: qs.length,
+        options: [blankOption(), blankOption()],
+        dirty: false,
+        _key: nextKey.current++,
+      },
     ]);
   }
 

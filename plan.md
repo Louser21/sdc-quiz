@@ -182,6 +182,19 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 - [x] `docs/final-report.md` written (system summary, DoD matrix, trade-offs, runbooks).
 - [x] Final commit + milestone check-in ("After load testing, before final report" → complete).
 
+## Phase 8.5 — Player-identity hardening (temp checks) (CURRENT)
+
+Manual QA found identity + editor data-loss issues. Fixed with temp checks now;
+proper email/device binding is deferred to `docs/known-issues.md`:
+
+- [x] Editor: saves no longer discard other unsaved questions (soft-reload merge).
+- [x] Nickname frozen once the paper starts (renames only in lobby).
+- [x] Device stuck to one LIVE game (`ALREADY_IN_GAME`); released on finish.
+- [x] `GET /api/play/me` + `/join` resume banner ("Continue your paper").
+- [x] Finished-page nav: host → dashboard; player → Home.
+- [x] `docs/known-issues.md` (identity model, Redis gap, single-instance limits).
+- [x] Tests: nickname freeze, second-live-game guard, /play/me (35 integration / 6 files green).
+
 ---
 
 ## Milestone check-ins

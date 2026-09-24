@@ -554,9 +554,14 @@ function Final({
           </div>
         ))}
       </div>
-      <Link href="/join" className="text-sm text-violet-400 underline">
-        Play another round
-      </Link>
+      <div className="mt-2 flex items-center gap-4">
+        <Link href="/" className="text-sm text-zinc-500 underline hover:text-zinc-300">
+          Home
+        </Link>
+        <Link href="/join" className="text-sm text-violet-400 underline">
+          Play another round
+        </Link>
+      </div>
     </div>
   );
 }

@@ -258,7 +258,10 @@ export default function HostLivePage() {
         <div className="mt-5">
           <Leaderboard rows={state!.leaderboard} highlightId="" />
         </div>
-        <div className="mt-6 text-center">
+        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+          <Button variant="ghost" onClick={() => router.push("/dashboard")}>
+            Back to dashboard
+          </Button>
           <Button onClick={() => router.push("/games")}>Back to sessions</Button>
         </div>
       </Card>

@@ -79,6 +79,10 @@ Everything on the DoD board is green, or honestly `[~]` pending a staging VPS
 
 - `npm run lint` is broken repo-wide (pre-existing TS config drift, unrelated to
   delivered code); `typecheck` is the enforced gate and is green.
+- Player identity is cookie-based, not device/email-bound; renames freeze when a
+  paper starts and one device may hold only one LIVE game. The full identity
+  model, Redis live-state gap, and single-instance limits are catalogued in
+  `docs/known-issues.md` with their current mitigations.
 - Full-scale (1,000-player) k6 runs, reconnect storm at scale, and a real
   staging VM + TLS certificate sweep remain to be executed on infrastructure.
 

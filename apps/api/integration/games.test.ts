@@ -444,3 +444,97 @@ describe("socket paper flow (server-authoritative CBT)", () => {
     expect(session?.status).toBe("FINISHED");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Identity hardening (Phase 8.5 temp checks)
+// ---------------------------------------------------------------------------
+
+describe("identity hardening (temp checks)", () => {
+  it("freezes a player's nickname once the paper has started", async () => {
+    const { token } = await registerUser(app);
+    const { quizId } = await createPublishedQuiz(app, token, "Rename quiz", 1, 60);
+    const { gameId, joinCode } = await createGame(token, quizId);
+
+    const p1 = await joinPlayerAsCookie(app, joinCode, "fixed-name");
+    expect(p1.body.join.player.nickname).toBe("fixed-name");
+
+    const host = ioc(ctx.base, { transports: ["websocket"], extraHeaders: { Cookie: `quiz_session=${token}` } });
+    await waitFor(host, "connect");
+    const hostStateP = waitFor<{ phase: string }>(host, "host:state");
+    host.emit("host:join-game", { gameId });
+    await hostStateP;
+    const startedP = waitFor<{ deadline: number }>(host, "host:paper-started");
+    host.emit("host:start-paper", { gameId });
+    await startedP;
+
+    // Rename attempt mid-paper is ignored; the stored identity is preserved.
+    const rejoin = await app.inject({
+      method: "POST",
+      url: "/api/play/join",
+      payload: { gameCode: joinCode, nickname: "HACKED" },
+      cookies: p1.pair,
+    });
+    expect(rejoin.statusCode).toBe(200);
+    const joined = JSON.parse(rejoin.body).join as { player: { playerId: string; nickname: string } };
+    expect(joined.player.playerId).toBe(p1.body.join.player.playerId);
+    expect(joined.player.nickname).toBe("fixed-name");
+
+    host.emit("host:end-paper", { gameId });
+    await waitFor(host, "host:game-finished");
+    host.disconnect();
+  });
+
+  it("refuses joining a second live game while already in one, then allows it once that game finishes", async () => {
+    const { token } = await registerUser(app);
+    const { quizId: quizA } = await createPublishedQuiz(app, token, "Live A", 1, 60);
+    const { quizId: quizB } = await createPublishedQuiz(app, token, "Live B", 1, 60);
+    const { joinCode: codeA } = await createGame(token, quizA);
+    const { joinCode: codeB } = await createGame(token, quizB);
+
+    const pA = await joinPlayerAsCookie(app, codeA, "multi-slot");
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/play/join",
+      payload: { gameCode: codeB, nickname: "multi-slot" },
+      cookies: pA.pair,
+    });
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.body).error?.code).toBe("ALREADY_IN_GAME");
+
+    // When that live game finishes, the identity is released and B accepts.
+    const { redis } = await import("../src/redis/client.js");
+    const { prisma } = await import("../src/db/client.js");
+    const session = await prisma.gameSession.findUnique({ where: { joinCode: codeA } });
+    expect(session).not.toBeNull();
+    await redis.hset(`game:${session!.id}`, "phase", "FINISHED");
+    await prisma.gameSession.update({
+      where: { id: session!.id },
+      data: { status: "FINISHED", endedAt: new Date() },
+    });
+
+    const released = await app.inject({
+      method: "POST",
+      url: "/api/play/join",
+      payload: { gameCode: codeB, nickname: "multi-slot" },
+      cookies: pA.pair,
+    });
+    expect(released.statusCode).toBe(200);
+    expect(JSON.parse(released.body).join.quizTitle).toBe("Live B");
+  });
+
+  it("GET /api/play/me exposes the current live session for a returning device", async () => {
+    const { token } = await registerUser(app);
+    const { quizId } = await createPublishedQuiz(app, token, "Me quiz", 1, 60);
+    const { joinCode } = await createGame(token, quizId);
+
+    const none = await app.inject({ method: "GET", url: "/api/play/me" });
+    expect(JSON.parse(none.body).me).toBeNull();
+
+    const p1 = await joinPlayerAsCookie(app, joinCode, "me-player");
+    const me = await app.inject({ method: "GET", url: "/api/play/me", cookies: p1.pair });
+    const meBody = JSON.parse(me.body);
+    expect(meBody.me.nickname).toBe("me-player");
+    expect(meBody.me.joinCode).toBe(joinCode);
+    expect(meBody.me.phase).toBe("LOBBY");
+  });
+});

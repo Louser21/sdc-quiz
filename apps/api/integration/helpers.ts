@@ -125,7 +125,7 @@ export async function joinPlayerAsCookie(
   app: FastifyInstance,
   joinCode: string,
   nickname: string,
-): Promise<{ cookie: string; pair: { player_session: string }; body: { join: { gameId: string; joinCode: string; player: { playerId: string } } } }> {
+): Promise<{ cookie: string; pair: { player_session: string }; body: { join: { gameId: string; joinCode: string; player: { playerId: string; nickname: string } } } }> {
   const resp = await app.inject({
     method: "POST",
     url: "/api/play/join",

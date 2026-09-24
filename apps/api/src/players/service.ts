@@ -60,6 +60,22 @@ export async function joinGame(
   const rejoin =
     existing !== null && existing.gameId === session.id && session.status !== "FINISHED";
 
+  // Identity guard: a device already sitting in another LIVE game must not have
+  // its cookie silently re-pointed by joining game B (tab-identity theft). The
+  // old session is released only once that game has finished.
+  if (existing && !rejoin) {
+    const otherState = await store.getState(existing.gameId);
+    if (otherState && otherState.phase !== "FINISHED") {
+      const otherSession = await prisma.gameSession.findUnique({
+        where: { id: existing.gameId },
+        select: { joinCode: true },
+      });
+      throw errors.alreadyInGame(
+        `You are already in game ${otherSession?.joinCode ?? "another live game"} — finish that paper first`,
+      );
+    }
+  }
+
   // Fresh joiners are welcome only while the paper is still in the lobby;
   // returning devices keep re-joining throughout the paper to restore their state.
   if (!rejoin && state.phase !== "LOBBY") {
@@ -69,16 +85,22 @@ export async function joinGame(
   let playerId: string;
   let sessionId: string;
   let rejoined = rejoin;
+  let nickname = input.nickname;
 
   if (rejoin) {
     playerId = existing!.playerId;
     sessionId = existing!.sessionId;
+    // Nickname freeze: renames are only allowed while the paper is still in
+    // the lobby. Once it has started (or the player already submitted), the
+    // stored identity is kept and the form input is ignored — name-tampering
+    // after scoring has begun is not permitted.
+    const effectiveNickname = state.phase !== "LOBBY" ? existing!.nickname : input.nickname;
     // Nickname may have changed on the join form; enforce uniqueness again.
     try {
       await prisma.player.update({
         where: { id: playerId },
         data: {
-          nickname: input.nickname,
+          nickname: effectiveNickname,
           lastSeenAt: new Date(),
           status: "ACTIVE",
         },
@@ -87,6 +109,7 @@ export async function joinGame(
       if (isUniqueViolation(err)) throw errors.nicknameTaken();
       throw err;
     }
+    nickname = effectiveNickname;
   } else {
     // New identity (first join, or joining a different game).
     const token = generatePlayerToken();
@@ -111,7 +134,7 @@ export async function joinGame(
   // Attach to the Redis lobby (preserve any existing score/submission on rejoin).
   const existingRecord = await store.getPlayer(session.id, playerId);
   await store.upsertPlayer(session.id, playerId, {
-    nickname: input.nickname,
+    nickname,
     score: existingRecord?.score ?? 0,
     connected: true,
     submitted: existingRecord?.submitted ?? false,
@@ -124,7 +147,7 @@ export async function joinGame(
     .to(hostRoom(session.id))
     .emit("host:player-updated", {
       playerId,
-      nickname: input.nickname,
+      nickname,
       connected: true,
       submitted: existingRecord?.submitted ?? false,
     });
@@ -132,14 +155,14 @@ export async function joinGame(
   logGame(rejoined ? "PLAYER_REJOINED" : "PLAYER_JOINED", {
     gameId: session.id,
     playerId,
-    nickname: input.nickname,
+    nickname,
   });
 
   const result: PlayerJoinResultDto = {
     gameId: session.id,
     joinCode: session.joinCode,
     quizTitle: session.quiz.title,
-    player: { playerId, nickname: input.nickname, totalPoints: existingRecord?.score ?? 0 },
+    player: { playerId, nickname, totalPoints: existingRecord?.score ?? 0 },
     state: await buildPlayerState(session.id, playerId),
   };
 

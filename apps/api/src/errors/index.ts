@@ -9,6 +9,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "GAME_NOT_JOINABLE"
+  | "ALREADY_IN_GAME"
   | "NICKNAME_TAKEN"
   | "RATE_LIMITED"
   | "INVALID_GAME_CODE"
@@ -70,6 +71,8 @@ export const errors = {
   conflict: (msg = "Conflict") => new AppError("CONFLICT", msg, 409),
   gameNotJoinable: (msg = "This game is not accepting players") =>
     new AppError("GAME_NOT_JOINABLE", msg, 409),
+  alreadyInGame: (msg = "You are already in a live game") =>
+    new AppError("ALREADY_IN_GAME", msg, 409),
   nicknameTaken: (msg = "That nickname is already in use on this device/game") =>
     new AppError("NICKNAME_TAKEN", msg, 409),
   rateLimited: (msg = "Too many requests") => new AppError("RATE_LIMITED", msg, 429),

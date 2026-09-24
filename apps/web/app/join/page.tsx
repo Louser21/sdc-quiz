@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PlayerJoinResultDto } from "@quiz/shared";
 import { api, ApiError } from "../../lib/api";
 import { Button, Card, ErrorBanner, Field, Input } from "../../components/ui";
 import { dropSocket } from "../../lib/socket";
+
+interface LiveSession {
+  playerId: string;
+  gameId: string;
+  joinCode: string;
+  quizTitle: string;
+  phase: string;
+  nickname: string;
+}
 
 export default function JoinPage() {
   const router = useRouter();
@@ -13,6 +22,25 @@ export default function JoinPage() {
   const [nickname, setNickname] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<LiveSession | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api<{ me: LiveSession | null }>("/api/play/me");
+        if (!cancelled) setMe(res.me);
+      } catch {
+        if (!cancelled) setMe(null);
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function join(ev: React.FormEvent) {
     ev.preventDefault();
@@ -43,6 +71,20 @@ export default function JoinPage() {
       </div>
 
       <Card className="w-full max-w-sm">
+        {!checking && me ? (
+          <div className="mb-4 rounded-xl border border-violet-800/60 bg-violet-950/40 p-4">
+            <p className="text-sm font-semibold text-violet-200">
+              Already playing as <span className="font-black">{me.nickname}</span>
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">
+              {me.quizTitle} · code <span className="font-mono text-zinc-300">{me.joinCode}</span>
+              {me.phase === "ACTIVE" ? " · in progress" : " · waiting to start"}
+            </p>
+            <Button className="mt-3 w-full" onClick={() => router.push("/play")}>
+              Continue your paper
+            </Button>
+          </div>
+        ) : null}
         <form onSubmit={join} className="flex flex-col gap-4">
           <ErrorBanner message={error} />
           <Field label="Game code">
