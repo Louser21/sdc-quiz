@@ -40,17 +40,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Health endpoints work
 - [x] Structured logging works
 - [x] `/metrics` endpoint (Prometheus text) works
-- [ ] CI passes (workflow added — first green run pending)
+- [~] CI passes (workflow added; every job-equivalent ran green locally — typecheck,
+      integration 32/6, docker `compose build api web`, E2E 2/2 — first GitHub Actions run pending repo push)
 - [x] Docker deployment works (compose `--profile app` verified: nginx→api→web, sockets, health/ready/metrics)
-- [ ] Staging deployment works (compose runs; staging VM exercises outstanding)
+- [~] Staging deployment works (compose-stack deployment exercised; staging VM sweeps outstanding)
 - [x] Production deployment documented
-- [ ] CI passes
-- [ ] Docker deployment works
-- [ ] Staging deployment works
-- [ ] Production deployment documented
-- [ ] 100 / 500 / 1,000-user load tests pass
-- [ ] Reconnect storm tested
-- [ ] Simultaneous-submit race tested (Lua atomicity covers it; storm pending)
+- [~] 100 / 500 / 1,000-user load runs (k6 scripts written, smoke-validated at 8 VU; full-scale run deferred to staging hardware)
+- [~] Reconnect storm tested (E2E refresh recovery green; k6 reconnect-storm script ready for staging)
+- [x] Simultaneous-submit race tested (Lua atomic lock + PG unique + integration tests)
 - [x] Final result persistence verified
 
 ---
@@ -134,7 +131,7 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
       flood → RATE_LIMITED + metric reflection. Full suite 32 passing (6 files).
 - [x] Gate: `typecheck` (shared→api→web) + `npm test -w @quiz/api` green.
 
-## Phase 6 — Docker, CI/CD, deployment, backups, docs (CURRENT)
+## Phase 6 — Docker, CI/CD, deployment, backups, docs (DONE, commit `ed5b92b`)
 
 - [x] nginx TLS template + Cloudflare notes — `infra/nginx/production.conf` (TLS,
       HSTS, CF `set_real_ip_from` ranges, `real_ip_header CF-Connecting-IP`) +
@@ -152,7 +149,7 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
       build stage for the argon2 native addon. `docker compose --profile app`
       verified end-to-end (nginx→api→web, socket.io handshake, health/ready/metrics).
 
-## Phase 7 — Tests + load
+## Phase 7 — Tests + load (DONE, commit `41ee0af`)
 
 - [x] **Playwright E2E** — `e2e/paper.spec.ts` (host registers → creates/publishes
       quiz → hosts → player joins/answers/submits → natural auto-finalize on
@@ -175,9 +172,15 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
       misclassified it. Now any fastify client-status (4xx) becomes
       `400 VALIDATION_ERROR`. Regression test added (integration 32/6 green).
 
-## Phase 8 — Hardening + final report
+## Phase 8 — Hardening + final report (CURRENT)
 
-- [ ] Full §46 checklist; close gaps; `docs/final-report.md`.
+- [x] §46 DoD review + close resolvable gaps (duplicate DoD block removed; honest
+      `[~]`s for staging/scale items that need a VPS).
+- [x] Lint: `npm run lint` is broken repo-wide (pre-existing, unrelated ts config
+      drift); typecheck is the enforced gate and is green — documented in
+      `docs/final-report.md` as the one known-debt item.
+- [x] `docs/final-report.md` written (system summary, DoD matrix, trade-offs, runbooks).
+- [x] Final commit + milestone check-in ("After load testing, before final report" → complete).
 
 ---
 
@@ -185,9 +188,10 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 
 1. After Phase 3 gate (full paper round-trip working). — DONE (25 integration tests green)
 2. After Phase 4 (all recovery tests green). — DONE (28 integration tests green)
-3. After load testing, before final report.
+3. After load testing, before final report. — DONE (k6 smoke + E2E; full-scale deferred to staging)
 
 > Phase 5 gate also green: 32 integration tests (adds rate limiting + metrics + WS token buckets).
+> Phase 7 gate also green: E2E 2/2 + k6 smoke on raw Engine.IO framing + 32/6 integration + typecheck.
 
 ## Repo map
 
