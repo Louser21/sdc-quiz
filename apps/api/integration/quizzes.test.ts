@@ -91,6 +91,16 @@ describe("quiz CRUD", () => {
     });
     expect(JSON.parse(published.body).quiz.status).toBe("PUBLISHED");
 
+    // Empty JSON body with a JSON content-type is a client fault → 400, not 500.
+    const emptyBody = await app.inject({
+      method: "POST",
+      url: `/api/quizzes/${quiz.id}/publish`,
+      headers: { "content-type": "application/json" },
+      ...withCookie(token),
+    });
+    expect(emptyBody.statusCode).toBe(400);
+    expect(JSON.parse(emptyBody.body).error.code).toBe("VALIDATION_ERROR");
+
     const dup = await app.inject({
       method: "POST",
       url: `/api/quizzes/${quiz.id}/duplicate`,

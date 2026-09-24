@@ -15,24 +15,53 @@ create game → join → connect socket → start paper → answer → submit.
 
 ## Scenarios
 
-### 1. Ramp to N concurrent players (`paper_ramp.js`, planned)
+Scripts live in `load-tests/k6/` and share `common.js` (REST seed, Engine.IO v4
+WebSocket handshake over raw `k6/ws` — **no custom k6 binary needed**). All
+scenarios: VU joins as a player via `POST /api/play/join` (gets the
+`player_session` cookie), opens a Socket.IO socket (websocket transport),
+`player:sync`s, answers, submits; VU #1 also connects as the seed host to
+start/keep the paper ACTIVE.
 
-- Warm-up: `VU=1`.
-- Profile: 5 min ramp 100 → 500 → 1000 sockets, then a 2-minute peak and
-  drain. Each virtual user answers one question and submits; the deadline is
-  set high so the run finishes naturally ("all submits" path).
+> **Before running at scale**: the default per-IP join throttle is 120/min —
+> a 1,000-VU run on one host will 429 everything. Raise the knobs on the
+> target instance for the run (`RATE_LIMIT_ENABLED=false` or
+> `RATE_LIMIT_JOIN_MINUTE=100000`), then restore them.
 
-### 2. Deadline storm (`paper_deadline.js`, planned)
+```sh
+# smoke (small: 8 VUs, validates the whole loop)
+docker run --rm -v "$PWD/load-tests/k6:/k6" --network host grafana/k6 run \
+  -e URL=https://staging.example.com /k6/paper_smoke.js
 
-- Uses a **short** paper timer (e.g. 30 s) so the global auto-submit fires for
-  the whole cohort at once — exercises `finalizePaper` at peak cardinality
-  (Lua auto-submit for all, PG bulk persist, leaderboard ZSET).
+# ramp to 1000 concurrent players
+docker run --rm -v "$PWD/load-tests/k6:/k6" --network host grafana/k6 run \
+  -e URL=https://staging.example.com /k6/paper_ramp.js
 
-### 3. Reconnect storm (`reconnect_storm.js`, planned)
+# deadline storm: 250 players × 30s paper → global auto-submit
+docker run --rm -v "$PWD/load-tests/k6:/k6" --network host grafana/k6 run \
+  -e URL=https://staging.example.com /k6/paper_deadline.js
 
-- Each VU opens a socket, drops it (`reconnect: false`), re-joins with the same
-  `player_session` cookie → asserts the restored `player:state`. Measures the
-  reconnect restore rate under load (phase-7 hardening).
+# reconnect storm: join → sync → drop → re-join (same cookie), ×3
+docker run --rm -v "$PWD/load-tests/k6:/k6" --network host grafana/k6 run \
+  -e URL=https://staging.example.com /k6/reconnect_storm.js
+```
+
+### 1. Ramp to N concurrent players (`paper_ramp.js`)
+
+Stages 100 → 1000 → 1000 (2 min) → 0. Each VU answers one question and
+submits; the paper is long (10 min) so the run exercises the alive-ACTIVE path
+plus the natural-end finishes.
+
+### 2. Deadline storm (`paper_deadline.js`)
+
+- 30-second paper so the global auto-submit fires for the whole cohort at once —
+  exercises `finalizePaper` at peak cardinality (Lua auto-submit for all, PG
+  bulk persist, leaderboard ZSET).
+
+### 3. Reconnect storm (`reconnect_storm.js`)
+
+- Each VU opens a socket, drops it, re-joins with the same `player_session`
+  cookie → asserts the restored `player:state`. Measures the reconnect restore
+  rate under load (phase-7 hardening).
 
 ## Metrics to record (docs/load-testing.md results table)
 
@@ -67,4 +96,14 @@ Also record event count from `GET /api/metrics` for an independent cross-check.
 3. `listLiveGameIds` (used by `/api/metrics` + boot restore) does a Redis SCAN —
    fine for ops, keep it out of hot paths.
 
-Work is tracked in `plan.md` Phase 7; results are appended below when run.
+## Results so far (local smoke, 2026-09-24, compose stack)
+
+| Metric | Observed |
+|--------|----------|
+| HTTP req failures | 0 / 13 (seed + 8 joins) |
+| `ws_connect_ms` (socket.io connected) | avg 11.4 ms · p95 26.8 ms |
+| ws messages in/out | 44 / 19 across 9 sockets (sync→state→answer→ack→scorecard verified) |
+
+Full 100–1000 VU runs require staging hardware (local compose box is the
+platform's bottleneck); record them here with the table from "Metrics to record"
+when run.

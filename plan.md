@@ -154,9 +154,26 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 
 ## Phase 7 — Tests + load
 
-- [ ] Complete unit/integration coverage; Playwright E2E host→player paper + refresh recovery.
-- [ ] k6 WebSocket scenarios: join lobby → paper 1,000 → auto-submit finish; 100 → 500 → 1000; record in
-      `docs/load-testing.md`; fix bottlenecks and re-run.
+- [x] **Playwright E2E** — `e2e/paper.spec.ts` (host registers → creates/publishes
+      quiz → hosts → player joins/answers/submits → natural auto-finalize on
+      all-submitted → both sides see the final leaderboard) and
+      `e2e/recovery.spec.ts` (player refresh mid-paper restores server-side
+      selections via cookie re-identification + `player:sync`, then can still
+      submit). 2 specs green vs the compose stack (`npm run test:e2e`,
+      ~12 s). `npm run test:e2e` added.
+- [x] **k6 load scripts** (`load-tests/k6/`): `common.js` (REST seed + raw
+      Engine.IO v4 websocket client over `k6/ws` — no custom binary), plus
+      `paper_ramp.js` (100→1000), `paper_deadline.js` (250×30s auto-submit
+      storm), `reconnect_storm.js` (cookie-restored reconnects), `paper_smoke.js`
+      (CI smoke). Smoke validated end-to-end vs compose: 0 HTTP failures,
+      ws_connect avg 11.4 ms, sync→state→answer→ack→scorecard all driven over
+      raw sockets. Full 1000-VU runs deferred to staging hardware (see
+      `docs/load-testing.md`).
+- [x] **Bug found via k6, fixed + regression-tested**: `POST` with an empty JSON
+      body (e.g. publish) returned `500 INTERNAL_ERROR`; Fastify's
+      `FST_ERR_CTP_EMPTY_JSON_BODY` isn't `err.validation`, so the handler
+      misclassified it. Now any fastify client-status (4xx) becomes
+      `400 VALIDATION_ERROR`. Regression test added (integration 32/6 green).
 
 ## Phase 8 — Hardening + final report
 

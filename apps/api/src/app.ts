@@ -80,6 +80,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       });
       return;
     }
+    // Fastify body/media-type failures (e.g. FST_ERR_CTP_EMPTY_JSON_BODY) are
+    // client faults, not server faults — surface them as 400s, not 500s.
+    if (typeof fastifyErr.statusCode === "number" && fastifyErr.statusCode >= 400 && fastifyErr.statusCode < 500) {
+      reply.status(fastifyErr.statusCode).send({
+        error: { code: "VALIDATION_ERROR", message: fastifyErr.message },
+      });
+      return;
+    }
     sendError(reply, err);
   });
 
