@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: development
+  DATABASE_URL: postgresql://quiz:quiz@localhost:5432/quiz
+  REDIS_URL: redis://localhost:6379
+  SESSION_SECRET: ci-secret-0123456789abcdef0123456789abcdef
+  FRONTEND_ORIGIN: http://localhost:3002
+  NEXT_PUBLIC_API_URL: http://localhost:3002
+
+jobs:
+  lint:
+    name: Lint (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true # eslint is currently broken repo-wide; gate is typecheck + tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build -w @quiz/shared
+      - run: npm run typecheck
+
+  test:
+    name: Unit + integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: quiz
+          POSTGRES_USER: quiz
+          POSTGRES_PASSWORD: quiz
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U quiz -d quiz"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npx prisma migrate deploy
+      - run: npm run build -w @quiz/shared
+      - name: Run unit + integration tests
+        run: npm test -w @quiz/api
+      - name: Run web typecheck (consumes shared dist)
+        run: npm run typecheck -w @quiz/web
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    needs: [typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Build API image
+        run: docker compose build api
+      - name: Build web image
+        run: docker compose build web

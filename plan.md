@@ -36,10 +36,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Correct answers aren't exposed early (never sent before submit)
 - [x] PostgreSQL persistence works (papers, scores, FINISHED sessions)
 - [x] Redis live state works
-- [ ] Backups configured
+- [x] Backups configured (`scripts/backup.sh` + retention; restore tested on compose Postgres)
 - [x] Health endpoints work
 - [x] Structured logging works
 - [x] `/metrics` endpoint (Prometheus text) works
+- [ ] CI passes (workflow added — first green run pending)
+- [x] Docker deployment works (compose `--profile app` verified: nginx→api→web, sockets, health/ready/metrics)
+- [ ] Staging deployment works (compose runs; staging VM exercises outstanding)
+- [x] Production deployment documented
 - [ ] CI passes
 - [ ] Docker deployment works
 - [ ] Staging deployment works
@@ -130,13 +134,23 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
       flood → RATE_LIMITED + metric reflection. Full suite 32 passing (6 files).
 - [x] Gate: `typecheck` (shared→api→web) + `npm test -w @quiz/api` green.
 
-## Phase 6 — Docker, CI/CD, deployment, backups, docs
+## Phase 6 — Docker, CI/CD, deployment, backups, docs (CURRENT)
 
-- [ ] nginx TLS template + Cloudflare notes.
-- [ ] GitHub Actions CI (install→lint→typecheck→unit→integration→build→docker build).
-- [ ] `scripts/backup.sh` + `docs/database-backup.md`, restore tested on compose Postgres.
-- [ ] Full `docs/` set (architecture, local-development, staging, production, disaster-recovery,
-      load-testing, monitoring, troubleshooting, websocket-events, api).
+- [x] nginx TLS template + Cloudflare notes — `infra/nginx/production.conf` (TLS,
+      HSTS, CF `set_real_ip_from` ranges, `real_ip_header CF-Connecting-IP`) +
+      `docs/production.md`.
+- [x] GitHub Actions CI — `.github/workflows/ci.yml`: lint (non-blocking, broken
+      repo-wide), typecheck, unit+integration (Postgres+Redis services), web typecheck,
+      Docker image build. First green run pending repo push.
+- [x] `scripts/backup.sh` + `docs/database-backup.md` — PG custom-format dump +
+      Redis RDB snapshot, `KEEP_N` retention, cron snippet; **restore tested** on
+      compose Postgres (pg_restore into fresh DB, verified rows, dropped).
+- [x] Full `docs/` set: architecture, local-development, staging, production,
+      disaster-recovery, load-testing, monitoring, troubleshooting, websocket-events, api.
+- [x] Dockerfile fixes discovered by CI-drilling: `node:22-slim` (deps require
+      Node ≥22 — argon2/cookie/vitest EBADENGINE) + python3/make/g++ in the API
+      build stage for the argon2 native addon. `docker compose --profile app`
+      verified end-to-end (nginx→api→web, socket.io handshake, health/ready/metrics).
 
 ## Phase 7 — Tests + load
 

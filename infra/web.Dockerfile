@@ -1,5 +1,5 @@
 # Frontend (Next.js). Context = repo root.
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ RUN npm ci
 COPY . .
 RUN npm run build --workspace @quiz/shared && npm run build --workspace @quiz/web
 
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
