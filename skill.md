@@ -112,3 +112,9 @@ Phase transitions `LOBBY -> ACTIVE -> FINISHED` are enforced in Lua. `GAME_TRANS
 - `git` has no remote; commit messages follow the existing `Phase N: ...` style.
 - Deadline timers live in the API process memory (`paperTimers` in `sockets/handlers.ts`) but the
   deadline itself lives in Redis — `restoreActiveTimers()` re-arms them on boot.
+- **Host-disconnect policy:** the deadline timer is server-side and authoritative — a paper keeps running
+  (and finishing) even while the host is disconnected; the host simply rejoins via `host:join-game` to get a
+  fresh `host:state` at any phase. `HOST_GRACE_PERIOD_MS` (default 120 s) is the documented warm-window knob.
+- **Recovery invariants** (covered by `integration/recovery.test.ts`): reconnect/refresh/network-switch
+  restore the full paper view from Redis; a submitted paper stays immutable across reconnects; re-submit is
+  an idempotent no-op; a backend restart re-arms orphaned deadline timers and finishes + persists the paper.

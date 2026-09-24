@@ -26,11 +26,11 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Server-authoritative scoring works (fixed points: `SCORE_BASE` per correct, 0 wrong)
 - [x] Duplicate answers prevented (atomic submit lock; PG unique `(gameId, playerId, questionId)`)
 - [x] Late answers rejected (`PAPER_ENDED` / `PLAYER_ALREADY_SUBMITTED`, enforced in Lua)
-- [ ] Reconnection works
-- [ ] Refresh recovery works
-- [ ] Network switching recovery tested
-- [ ] Host recovery works
-- [~] Backend restart recovery (timer restore implemented; test pending)
+- [x] Reconnection works
+- [x] Refresh recovery works
+- [x] Network switching recovery tested
+- [x] Host recovery works (paper runs on without the host; rejoin restores console)
+- [x] Backend restart recovery tested (boot re-arms deadline timers from Redis)
 - [x] Unauthorized operations rejected (ownership + role separation)
 - [ ] Rate limiting enabled
 - [x] Correct answers aren't exposed early (never sent before submit)
@@ -90,13 +90,20 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
       (2 s paper via direct Redis tweak), persistence checks — 25 passing.
 - Gate: `typecheck` (shared→api→web) + `npm test -w @quiz/api` green.
 
-## Phase 4 — Recovery (IN PROGRESS)
+## Phase 4 — Recovery (DONE, commit in `git log`)
 
-- [ ] Player reconnect on socket: cookie → player → game → full `PlayerGameStateView` (state already in Redis).
-- [ ] Refresh / sleep / network-switch recovery (same player/score/submission, no change allowed post-submit).
-- [ ] Host disconnect grace (`HOST_GRACE_PERIOD_MS`); host reconnect restores controls (current `host:state` push).
-- [ ] Backend-restart restore test (`restoreActiveTimers` implemented; add automated test).
-- [ ] Gate: reliability tests 1–10 automated.
+- [x] Player reconnect on socket: cookie → player → game → full `PlayerGameStateView` (selections, marks,
+      submission, scorecard all restored from Redis; post-submit edits still rejected atomically).
+- [x] Refresh / sleep / network-switch recovery (same player/score/submission; re-submit is an idempotent
+      no-op; exactly one paper persisted per player under reconnect storms).
+- [x] Host disconnect policy: the deadline timer is authoritative and the paper keeps running without the
+      host; `HOST_GRACE_PERIOD_MS` (default 120 s) is kept as the documented warm-window knob — a
+      disconnected host rejoins the console via `host:join-game` → fresh `host:state` at any phase.
+- [x] Backend restart restore test: paper is started on process A with a 3 s deadline, A is torn down, a
+      fresh process B against the same Redis re-arms the orphaned deadline timer and auto-submits +
+      finalizes the paper for every player; termination state is persisted to PG.
+- [x] Gate: `recovery.test.ts` — reconnect restore, post-submit immutability across reconnects, host
+      reconnect restores controls, backend restart; full suite 28 passing.
 
 ## Phase 5 — Security, rate limiting, observability
 
@@ -127,7 +134,7 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 ## Milestone check-ins
 
 1. After Phase 3 gate (full paper round-trip working). — DONE (25 integration tests green)
-2. After Phase 4 (all recovery tests green).
+2. After Phase 4 (all recovery tests green). — DONE (28 integration tests green)
 3. After load testing, before final report.
 
 ## Repo map
