@@ -6,6 +6,7 @@ import type { QuizSummaryDto } from "@quiz/shared";
 import { api, ApiError } from "../../../lib/api";
 import { Button, Card, ErrorBanner, Field, Input } from "../../../components/ui";
 import { RequireAuth } from "../../../components/auth";
+import { HostChrome } from "../../../components/chrome";
 
 export default function NewQuizPage() {
   const router = useRouter();
@@ -32,7 +33,8 @@ export default function NewQuizPage() {
 
   return (
     <RequireAuth>
-      <div className="mx-auto max-w-lg">
+      <HostChrome>
+        <div className="mx-auto max-w-lg">
         <h1 className="mb-1 text-3xl font-black text-violet-400">New quiz</h1>
         <p className="mb-8 text-sm text-zinc-500">Give it a name, then add your first question.</p>
         <Card>
@@ -66,6 +68,7 @@ export default function NewQuizPage() {
           </form>
         </Card>
       </div>
+      </HostChrome>
     </RequireAuth>
   );
 }

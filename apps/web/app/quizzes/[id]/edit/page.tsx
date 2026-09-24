@@ -7,6 +7,7 @@ import type { OptionViewDto, QuestionViewDto, QuizDetailDto } from "@quiz/shared
 import { api, ApiError } from "../../../../lib/api";
 import { Button, Card, ErrorBanner, Field, Input } from "../../../../components/ui";
 import { RequireAuth } from "../../../../components/auth";
+import { HostChrome } from "../../../../components/chrome";
 
 interface EditorQuestion extends QuestionViewDto {
   dirty: boolean;
@@ -173,14 +174,17 @@ export default function QuizEditorPage() {
   if (loading) {
     return (
       <RequireAuth>
-        <p className="text-zinc-500">Loading…</p>
+        <HostChrome>
+          <p className="text-zinc-500">Loading…</p>
+        </HostChrome>
       </RequireAuth>
     );
   }
 
   return (
     <RequireAuth>
-      <div className="flex items-center justify-between">
+      <HostChrome>
+        <div className="flex items-center justify-between">
         <h1 className="text-3xl font-black text-violet-400">Edit quiz</h1>
         <Button variant="ghost" onClick={() => router.push("/dashboard")}>
           Back to dashboard
@@ -330,6 +334,7 @@ export default function QuizEditorPage() {
           </p>
         ) : null}
       </div>
+      </HostChrome>
     </RequireAuth>
   );
 }

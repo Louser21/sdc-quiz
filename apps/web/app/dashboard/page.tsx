@@ -7,6 +7,7 @@ import type { QuizSummaryDto } from "@quiz/shared";
 import { api, ApiError } from "../../lib/api";
 import { Button, Card, ErrorBanner } from "../../components/ui";
 import { RequireAuth } from "../../components/auth";
+import { HostChrome } from "../../components/chrome";
 
 function statusColor(status: string) {
   if (status === "PUBLISHED") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
@@ -69,7 +70,8 @@ export default function DashboardPage() {
 
   return (
     <RequireAuth>
-      <div className="flex items-end justify-between">
+      <HostChrome>
+        <div className="flex items-end justify-between">
         <div className="text-center">
           <h1 className="text-3xl font-black text-violet-400">My quizzes</h1>
           <p className="mt-1 text-sm text-zinc-500">Create, edit, and publish quizzes for live games.</p>
@@ -127,6 +129,7 @@ export default function DashboardPage() {
           ))
         )}
       </div>
+      </HostChrome>
     </RequireAuth>
   );
 }
