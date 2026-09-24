@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { ID_SCHEMA } from "./constants.js";
+import { ID_SCHEMA, JOIN_CODE_SCHEMA, NICKNAME_SCHEMA } from "./constants.js";
+import { PlayerGameStateView } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Auth DTOs
@@ -110,3 +111,45 @@ export const QuizDetailDto = z.object({
   updatedAt: z.string(),
 });
 export type QuizDetailDto = z.infer<typeof QuizDetailDto>;
+
+// ---------------------------------------------------------------------------
+// Game DTOs
+// ---------------------------------------------------------------------------
+
+export const GAME_SESSION_STATUSES_DTO = ["CREATED", "ACTIVE", "FINISHED", "ABANDONED"] as const;
+export const GameSessionStatusSchema = z.enum(GAME_SESSION_STATUSES_DTO);
+
+export const GameCreateDto = z.object({
+  quizId: ID_SCHEMA,
+});
+export type GameCreateDto = z.infer<typeof GameCreateDto>;
+
+export const GameSessionSummaryDto = z.object({
+  id: ID_SCHEMA,
+  quizId: ID_SCHEMA,
+  quizTitle: z.string(),
+  joinCode: JOIN_CODE_SCHEMA,
+  status: GameSessionStatusSchema,
+  playerCount: z.number().int().min(0),
+  createdAt: z.string(),
+});
+export type GameSessionSummaryDto = z.infer<typeof GameSessionSummaryDto>;
+
+export const PlayerJoinDto = z.object({
+  gameCode: JOIN_CODE_SCHEMA,
+  nickname: NICKNAME_SCHEMA,
+});
+export type PlayerJoinDto = z.infer<typeof PlayerJoinDto>;
+
+export const PlayerJoinResultDto = z.object({
+  gameId: ID_SCHEMA,
+  joinCode: JOIN_CODE_SCHEMA,
+  quizTitle: z.string(),
+  player: z.object({
+    playerId: ID_SCHEMA,
+    nickname: z.string(),
+    totalPoints: z.number().int(),
+  }),
+  state: PlayerGameStateView,
+});
+export type PlayerJoinResultDto = z.infer<typeof PlayerJoinResultDto>;

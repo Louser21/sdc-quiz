@@ -8,6 +8,8 @@ import { healthRoutes } from "./routes/health.js";
 import { authPlugin } from "./auth/plugin.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { quizRoutes } from "./routes/quizzes.routes.js";
+import { gameRoutes } from "./routes/games.routes.js";
+import { playRoutes } from "./routes/play.routes.js";
 
 export interface BuildAppOptions {
   /** Skip plugins/behaviors that need external services. Defaults to false. */
@@ -38,6 +40,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(authPlugin);
   await app.register(authRoutes, { prefix: "/api" });
   await app.register(quizRoutes, { prefix: "/api" });
+  await app.register(gameRoutes, { prefix: "/api" });
+  await app.register(playRoutes, { prefix: "/api" });
 
   app.setErrorHandler((err, req, reply) => {
     const fastifyErr = err as FastifyError;

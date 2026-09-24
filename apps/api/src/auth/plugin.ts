@@ -35,6 +35,34 @@ async function resolveUser(req: FastifyRequest): Promise<AuthUser | null> {
   const config = getConfig();
   const raw = req.cookies[config.SESSION_COOKIE_NAME];
   if (!raw) return null;
+  return resolveUserFromToken(raw);
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/** Resolve the host user from a raw Cookie header (for Socket.IO handshakes). */
+export async function resolveUserFromCookieHeader(
+  cookieHeader: string | undefined,
+): Promise<AuthUser | null> {
+  const config = getConfig();
+  if (!cookieHeader) return null;
+  const raw = parseCookies(cookieHeader)[config.SESSION_COOKIE_NAME];
+  if (!raw) return null;
+  return resolveUserFromToken(raw);
+}
+
+async function resolveUserFromToken(raw: string): Promise<AuthUser | null> {
   const tokenHash = hashSessionToken(raw);
   const session = await prisma.session.findUnique({
     where: { tokenHash },

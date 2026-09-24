@@ -2,11 +2,14 @@ import type { Server as HttpServer } from "node:http";
 import { Server as IoServer } from "socket.io";
 import { getConfig } from "../config.js";
 import { getLogger } from "../logging/logger.js";
+import { setupSocketServer } from "./handlers.js";
 
 declare module "socket.io" {
   interface SocketData {
     /** resolved host user id, when the socket authenticated as a host */
     hostUserId?: string;
+    /** resolved player row id, when the socket authenticated as a player */
+    playerId?: string;
     /** resolved player session id, when the socket authenticated as a player */
     playerSessionId?: string;
     gameId?: string;
@@ -16,7 +19,7 @@ declare module "socket.io" {
 
 /**
  * Attach Socket.IO to the running HTTP server. Game logic (state machine,
- * rooms, answers) is layered on top of this in `game/` and `sockets/handlers`.
+ * rooms, answers) is layered on top of this in `sockets/handlers.ts`.
  */
 export function attachSockets(server: HttpServer): IoServer {
   const config = getConfig();
@@ -38,20 +41,12 @@ export function attachSockets(server: HttpServer): IoServer {
 
   const logger = getLogger();
 
-  io.on("connection", (socket) => {
-    socket.data.connectAt = Date.now();
-    socket.on("player:heartbeat", () => {
-      // App-level presence heartbeat. Phase 3 updates player presence here.
-    });
-
-    socket.on("disconnect", () => {
-      logger.info({ sid: socket.id, reason: socket.handshake?.auth?.reason }, "socket disconnected");
-    });
-  });
-
   io.on("connect_error", (err) => {
     logger.warn({ err: err.message }, "socket connect error");
   });
+
+  // Wire all game event handlers + recovery.
+  setupSocketServer(io);
 
   return io;
 }

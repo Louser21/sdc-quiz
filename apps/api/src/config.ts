@@ -16,6 +16,8 @@ const envSchema = z.object({
   SESSION_COOKIE_NAME: z.string().default("quiz_session"),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).default(30),
 
+  PLAYER_SESSION_COOKIE_NAME: z.string().default("player_session"),
+
   HOST_GRACE_PERIOD_MS: z.coerce.number().int().min(0).default(120_000),
   DEFAULT_TIME_LIMIT_SECONDS: z.coerce.number().int().min(3).max(600).default(20),
 

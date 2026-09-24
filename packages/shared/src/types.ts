@@ -41,7 +41,7 @@ const PlayerQuestionView = QuestionPayload.extend({
   selectedOptionId: ID_SCHEMA.nullable(),
 });
 
-const PlayerQuestionResult = z.object({
+export const PlayerQuestionResult = z.object({
   questionId: ID_SCHEMA,
   correctOptionId: ID_SCHEMA,
   selectedOptionId: ID_SCHEMA.nullable(),
@@ -49,6 +49,7 @@ const PlayerQuestionResult = z.object({
   isCorrect: z.boolean(),
   totalPoints: z.number().int(),
 });
+export type PlayerQuestionResult = z.infer<typeof PlayerQuestionResult>;
 
 export const PlayerGameStateView = z.object({
   gameId: ID_SCHEMA,
@@ -66,7 +67,7 @@ export const PlayerGameStateView = z.object({
 });
 export type PlayerGameStateView = z.infer<typeof PlayerGameStateView>;
 
-const HostQuestionView = z.object({
+export const HostQuestionView = z.object({
   questionId: ID_SCHEMA,
   questionNumber: z.number().int().min(1),
   totalQuestions: z.number().int().min(1),
@@ -76,13 +77,15 @@ const HostQuestionView = z.object({
   questionEndsAt: z.number().int().positive(),
   answerCount: z.number().int().min(0),
 });
+export type HostQuestionView = z.infer<typeof HostQuestionView>;
 
-const HostQuestionResult = z.object({
+export const HostQuestionResult = z.object({
   questionId: ID_SCHEMA,
   correctOptionId: ID_SCHEMA,
   optionCounts: z.array(z.object({ optionId: ID_SCHEMA, count: z.number().int() })),
   answerCount: z.number().int(),
 });
+export type HostQuestionResult = z.infer<typeof HostQuestionResult>;
 
 export const HostGameStateView = z.object({
   gameId: ID_SCHEMA,
