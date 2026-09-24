@@ -26,6 +26,26 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.decorate("shuttingDown", false);
 
+  // Error/not-found handlers MUST be registered before any plugins or routes:
+  // Fastify v5 snapshots the error handler into route contexts at registration
+  // time, so registering these after the routes silently reverted to the
+  // framework default envelope ({statusCode, code, error, message}) instead of
+  // our {error: {code, message}} contract.
+  app.setErrorHandler((err, req, reply) => {
+    const fastifyErr = err as FastifyError;
+    if (fastifyErr.validation) {
+      reply.status(400).send({
+        error: { code: "VALIDATION_ERROR", message: fastifyErr.message },
+      });
+      return;
+    }
+    sendError(reply, err);
+  });
+
+  app.setNotFoundHandler((req, reply) => {
+    reply.status(404).send({ error: { code: "NOT_FOUND", message: `Route ${req.method} ${req.url} not found` } });
+  });
+
   if (!options.minimal) {
     await app.register(cors, {
       origin: config.FRONTEND_ORIGIN,
@@ -42,21 +62,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(quizRoutes, { prefix: "/api" });
   await app.register(gameRoutes, { prefix: "/api" });
   await app.register(playRoutes, { prefix: "/api" });
-
-  app.setErrorHandler((err, req, reply) => {
-    const fastifyErr = err as FastifyError;
-    if (fastifyErr.validation) {
-      reply.status(400).send({
-        error: { code: "VALIDATION_ERROR", message: fastifyErr.message },
-      });
-      return;
-    }
-    sendError(reply, err);
-  });
-
-  app.setNotFoundHandler((req, reply) => {
-    reply.status(404).send({ error: { code: "NOT_FOUND", message: `Route ${req.method} ${req.url} not found` } });
-  });
 
   return app;
 }

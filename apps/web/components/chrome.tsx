@@ -25,6 +25,9 @@ export function HostNav() {
       <div className="flex items-center gap-3 text-sm text-zinc-300">
         {!loading && user ? (
           <>
+            <Link href="/games" className="rounded-lg border border-zinc-700 px-3 py-1.5 hover:border-violet-500 hover:text-white">
+              Sessions
+            </Link>
             <span className="hidden sm:inline">Host: {user.name}</span>
             <button
               onClick={logout}

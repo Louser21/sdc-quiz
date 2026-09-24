@@ -7,7 +7,16 @@ const envSchema = z.object({
 
   API_PORT: z.coerce.number().int().positive().default(3001),
   PUBLIC_URL: z.string().url().default("http://localhost:8080"),
-  FRONTEND_ORIGIN: z.string().url().default("http://localhost:8080"),
+  FRONTEND_ORIGIN: z
+    .string()
+    .min(1)
+    .default("http://localhost:8080")
+    .transform((v) =>
+      v
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0),
+    ),
 
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),

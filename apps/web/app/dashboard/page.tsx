@@ -68,6 +68,19 @@ export default function DashboardPage() {
     }
   }
 
+  async function hostQuiz(q: QuizSummaryDto) {
+    if (q.status !== "PUBLISHED") return;
+    try {
+      const res = await api<{ game: { id: string } }>("/api/games", {
+        method: "POST",
+        body: JSON.stringify({ quizId: q.id }),
+      });
+      router.push(`/games/${res.game.id}/live`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start a game");
+    }
+  }
+
   return (
     <RequireAuth>
       <HostChrome>
@@ -112,6 +125,11 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
+                {q.status === "PUBLISHED" && (
+                  <Button onClick={() => void hostQuiz(q)} className="bg-emerald-600 hover:bg-emerald-500">
+                    Host
+                  </Button>
+                )}
                 <Button variant="ghost" onClick={() => router.push(`/quizzes/${q.id}/edit`)}>
                   Edit
                 </Button>

@@ -54,6 +54,7 @@ export type PlayerQuestionResult = z.infer<typeof PlayerQuestionResult>;
 export const PlayerGameStateView = z.object({
   gameId: ID_SCHEMA,
   joinCode: JOIN_CODE_SCHEMA,
+  quizTitle: z.string(),
   phase: GamePhaseSchema,
   hostPresent: z.boolean(),
   player: z.object({

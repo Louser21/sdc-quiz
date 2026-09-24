@@ -166,3 +166,13 @@ export type ServerEventName = keyof typeof SERVER_EVENTS;
 export type ServerEventPayload<T extends ServerEventName> = z.infer<
   (typeof SERVER_EVENTS)[T]
 >;
+
+/** Typed Socket.IO wire contract: server -> client. */
+export type ServerToClientEvents = {
+  [K in ServerEventName]: (payload: ServerEventPayload<K>) => void;
+};
+
+/** Typed Socket.IO wire contract: client -> server. */
+export type ClientToServerEvents = {
+  [K in ClientEventName]: (payload: ClientEventPayload<K>) => void;
+};

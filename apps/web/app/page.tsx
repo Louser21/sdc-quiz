@@ -26,7 +26,7 @@ export default function Home() {
         </Link>
       </div>
 
-      <p className="text-xs text-zinc-600">Platform status: build in progress</p>
+      <p className="text-xs text-zinc-600">Join with a code · answers are checked server-side · reconnect-proof</p>
     </main>
   );
 }

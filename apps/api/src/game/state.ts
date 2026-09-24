@@ -96,6 +96,7 @@ export async function buildPlayerState(gameId: string, playerId: string): Promis
   return {
     gameId,
     joinCode: state.joinCode,
+    quizTitle: state.quizTitle,
     phase: state.phase as PlayerGameStateView["phase"],
     hostPresent: state.hostConnected,
     player: { playerId, nickname: record.nickname, totalPoints: record.score },
