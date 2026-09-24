@@ -77,7 +77,7 @@ export async function createPublishedQuiz(
   token: string,
   title = `Quiz ${Math.random().toString(36).slice(2, 8)}`,
   questionCount = 2,
-  timeLimit = 10,
+  timeLimitSeconds = 600,
 ): Promise<{
   quizId: string;
   questions: { id: string; correctOptionId: string; wrongOptionId: string }[];
@@ -85,7 +85,7 @@ export async function createPublishedQuiz(
   const created = await app.inject({
     method: "POST",
     url: "/api/quizzes",
-    payload: { title, description: "integration" },
+    payload: { title, description: "integration", timeLimitSeconds },
     ...withCookie(token),
   });
   const quizId = JSON.parse(created.body).quiz.id as string;
@@ -95,7 +95,6 @@ export async function createPublishedQuiz(
       url: `/api/quizzes/${quizId}/questions`,
       payload: {
         text: `Q${n + 1}: pick the right one`,
-        timeLimit,
         options: [
           { text: `correct-opt-${n}`, isCorrect: true },
           { text: `wrong-opt-${n}`, isCorrect: false },

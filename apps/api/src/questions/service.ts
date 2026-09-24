@@ -25,14 +25,12 @@ function toView(q: {
   id: string;
   text: string;
   position: number;
-  timeLimit: number;
   options: { id: string; text: string; isCorrect: boolean }[];
 }): QuestionViewDto {
   return {
     id: q.id,
     text: q.text,
     position: q.position,
-    timeLimit: q.timeLimit,
     options: q.options.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
   };
 }
@@ -53,7 +51,6 @@ export async function addQuestion(
       quizId: quiz.id,
       text: dto.text,
       position,
-      timeLimit: dto.timeLimit,
       options: {
         create: dto.options.map((o, i) => ({ text: o.text, position: i, isCorrect: o.isCorrect })),
       },
@@ -72,7 +69,7 @@ export async function updateQuestion(
   const updated = await prisma.$transaction(async (tx) => {
     await tx.question.update({
       where: { id: question.id },
-      data: { text: dto.text, timeLimit: dto.timeLimit },
+      data: { text: dto.text },
     });
     await tx.option.deleteMany({ where: { questionId: question.id } });
     await tx.option.createMany({

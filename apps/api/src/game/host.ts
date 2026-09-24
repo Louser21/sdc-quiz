@@ -1,125 +1,127 @@
-import type { GameStateRow, QuestionSnapshot, QuestionCount } from "./store.js";
+import type { GameStateRow } from "./store.js";
 import * as store from "./store.js";
 import { errors } from "../errors/index.js";
-import { getLeaderboard } from "../leaderboard/index.js";
+import { scoreForCorrectness } from "../scoring/index.js";
+import type { SubmittedPaper } from "../answers/service.js";
 import {
   persistFinalResultsBackground,
-  persistQuestionResultsBackground,
+  persistSubmittedPaperBackground,
 } from "../answers/service.js";
-import type { HostQuestionResultEvent } from "@quiz/shared";
 
-export interface StartQuestionOutcome {
+export interface StartPaperOutcome {
   state: GameStateRow;
-  question: QuestionSnapshot;
 }
 
-/** Start the next question. Strict ordering: only `questions[questionNumber]` may start. */
-export async function startQuestion(
+/** Start the paper. LOBBY -> ACTIVE with a server-computed deadline. */
+export async function startPaper(
   gameId: string,
   hostUserId: string,
-  questionId: string,
-): Promise<StartQuestionOutcome> {
+): Promise<StartPaperOutcome> {
   const state = await store.getState(gameId);
   if (!state) throw errors.invalidGameCode("Game is not available");
   if (state.hostUserId !== hostUserId) throw errors.forbidden("Not the host of this game");
-  if (state.phase !== "LOBBY" && state.phase !== "QUESTION_RESULTS") {
-    throw errors.invalidTransition("Questions can only start from the lobby or after results");
+  if (state.phase !== "LOBBY") {
+    throw errors.invalidTransition("The paper can only start from the lobby");
   }
-  const questions = await store.getOrderedQuestions(gameId);
-  const nextIndex = state.questionNumber; // 0-based index of the next question to start
-  const next = questions[nextIndex];
-  if (!next) throw errors.invalidTransition("No more questions to start");
-  if (next.id !== questionId) {
-    throw errors.invalidTransition("Only the next question in sequence can be started");
-  }
-  const newState = await store.startQuestion(gameId, next, nextIndex + 1, questions.length);
-  return { state: newState, question: next };
+  const now = Date.now();
+  const deadline = now + state.timeLimitSeconds * 1000;
+  const next = await store.startPaper(gameId, now, deadline);
+  return { state: next };
 }
 
-export interface EndQuestionOutcome {
-  result: HostQuestionResultEvent;
-  answers: store.StoredAnswer[];
+export interface FinalizePaperOutcome {
+  leaderboard: { playerId: string; nickname: string; score: number }[];
+  quizTitle: string;
+  joinCode: string;
+  papers: SubmittedPaper[];
 }
 
-/** End the active question (not ownership-checked — callers enforce host identity). */
-export async function endActiveQuestion(gameId: string): Promise<EndQuestionOutcome> {
-  const result = await store.endQuestion(gameId);
-  const answers = await store.getAnswersForQuestion(gameId, result.questionId);
+/**
+ * End the paper for every player: auto-submit any outstanding selections,
+ * compute authoritative scores, and flip the game to FINISHED. Not
+ * ownership-checked — callers (host command or the deadline timer) enforce
+ * their own authority. Idempotent once FINISHED.
+ */
+export async function finalizePaper(gameId: string): Promise<FinalizePaperOutcome> {
+  const state = await store.getState(gameId);
+  if (!state) throw errors.invalidGameCode("Game is not available");
+  if (state.phase === "FINISHED") {
+    const players = await store.getPlayers(gameId);
+    return {
+      leaderboard: store.toLeaderboardEntries(players),
+      quizTitle: state.quizTitle,
+      joinCode: state.joinCode,
+      papers: [],
+    };
+  }
+  if (state.phase !== "ACTIVE") {
+    throw errors.paperNotActive("The paper is not active");
+  }
+
+  const now = Date.now();
+  await store.autoSubmitRemaining(gameId, now);
+
   const players = await store.getPlayers(gameId);
-  const scores = new Map(Object.entries(players).map(([id, r]) => [id, r.score]));
-  const nicknames = new Map(Object.entries(players).map(([id, r]) => [id, r.nickname]));
-  const leaderboard = await getLeaderboard(gameId, nicknames);
+  const questions = await store.getQuestions(gameId);
+  const papers: SubmittedPaper[] = [];
+  const scores = new Map<string, number>();
 
-  persistQuestionResultsBackground({
-    gameId,
-    questionId: result.questionId,
-    correctOptionId: result.correctOptionId,
-    answers,
-    scores,
-  });
+  for (const [playerId, record] of Object.entries(players)) {
+    if (!record.submitted) continue;
+    const selections = await store.getSelections(gameId, playerId);
+    const rows = Object.entries(selections).map(([questionId, optionId]) => {
+      const correct = questions.correct[questionId] === optionId;
+      return {
+        questionId,
+        optionId,
+        isCorrect: correct,
+        points: scoreForCorrectness(correct),
+      };
+    });
+    const score = rows.reduce((s, r) => s + r.points, 0);
+    await store.setPlayerScore(gameId, playerId, score);
+    scores.set(playerId, score);
+    papers.push({
+      gameId,
+      playerId,
+      submittedAt: record.submittedAt ?? now,
+      rows,
+    });
+  }
+
+  await store.finishGame(gameId);
+
+  for (const paper of papers) persistSubmittedPaperBackground(paper);
+  persistFinalResultsBackground(gameId, scores);
+
+  // Re-fetch AFTER persisting every score so auto-submitted players appear
+  // with the points they earned, not the pre-finalize zeros.
+  const finalPlayers = await store.getPlayers(gameId);
 
   return {
-    result: {
-      questionId: result.questionId,
-      correctOptionId: result.correctOptionId,
-      optionCounts: result.optionCounts.map((c) => ({ optionId: c.optionId, count: c.count })),
-      answerCount: result.answerCount,
-      leaderboard,
-    },
-    answers,
+    leaderboard: store.toLeaderboardEntries(finalPlayers),
+    quizTitle: state.quizTitle,
+    joinCode: state.joinCode,
+    papers,
   };
 }
 
-export async function endQuestion(gameId: string, hostUserId: string): Promise<EndQuestionOutcome> {
+/** Host-requested early end: same finalize path, gated to ACTIVE. */
+export async function endPaper(
+  gameId: string,
+  hostUserId: string,
+): Promise<FinalizePaperOutcome> {
   const state = await store.getState(gameId);
   if (!state) throw errors.invalidGameCode("Game is not available");
   if (state.hostUserId !== hostUserId) throw errors.forbidden("Not the host of this game");
-  return endActiveQuestion(gameId);
+  if (state.phase === "FINISHED") {
+    throw errors.gameFinished("That paper has already finished");
+  }
+  return finalizePaper(gameId);
 }
 
-/** Find the next question id after the current state, if any. */
-export async function nextQuestionId(gameId: string): Promise<string | null> {
+/** Find whether the game can still accept a fresh start command (used by guard rails). */
+export async function canStartPaper(gameId: string): Promise<boolean> {
   const state = await store.getState(gameId);
-  if (!state) throw errors.invalidGameCode("Game is not available");
-  const questions = await store.getOrderedQuestions(gameId);
-  return questions[state.questionNumber]?.id ?? null;
+  return state !== null && state.phase === "LOBBY";
 }
-
-export interface FinishGameOutcome {
-  leaderboard: Awaited<ReturnType<typeof getLeaderboard>>;
-  quizTitle: string;
-  joinCode: string;
-}
-
-export async function finishGame(gameId: string, hostUserId: string): Promise<FinishGameOutcome> {
-  const state = await store.getState(gameId);
-  if (!state) throw errors.invalidGameCode("Game is not available");
-  if (state.hostUserId !== hostUserId) throw errors.forbidden("Not the host of this game");
-  await store.finishGame(gameId);
-  const players = await store.getPlayers(gameId);
-  const scores = new Map(Object.entries(players).map(([id, r]) => [id, r.score]));
-  const nicknames = new Map(Object.entries(players).map(([id, r]) => [id, r.nickname]));
-  const leaderboard = await getLeaderboard(gameId, nicknames);
-
-  persistFinalResultsBackground(gameId, scores);
-
-  // Persist the session lifecycle to Postgres (best-effort; Redis is authoritative).
-  void (async () => {
-    try {
-      const { prisma } = await import("../db/client.js");
-      await prisma.gameSession.update({
-        where: { id: gameId },
-        data: { status: "FINISHED", endedAt: new Date() },
-      });
-    } catch (err) {
-      (await import("../logging/logger.js")).getLogger().warn(
-        { gameId, err: err instanceof Error ? err.message : String(err) },
-        "failed to persist finished session",
-      );
-    }
-  })();
-
-  return { leaderboard, quizTitle: state.quizTitle, joinCode: state.joinCode };
-}
-
-export type { QuestionCount };

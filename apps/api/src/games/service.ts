@@ -109,7 +109,6 @@ export async function createGame(
     list: quiz.questions.map((q) => ({
       id: q.id,
       text: q.text,
-      timeLimit: q.timeLimit,
       options: q.options.map((o) => ({ id: o.id, text: o.text })),
     })),
     correct: Object.fromEntries(
@@ -127,6 +126,7 @@ export async function createGame(
       quizId: quiz.id,
       quizTitle: quiz.title,
       hostUserId: userId,
+      timeLimitSeconds: quiz.timeLimitSeconds,
     },
     snapshot,
   );

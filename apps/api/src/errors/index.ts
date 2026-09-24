@@ -14,9 +14,9 @@ export type ErrorCode =
   | "INVALID_GAME_CODE"
   | "INVALID_SESSION"
   | "GAME_FINISHED"
-  | "QUESTION_NOT_ACTIVE"
-  | "ALREADY_ANSWERED"
-  | "ANSWER_TOO_LATE"
+  | "PAPER_NOT_ACTIVE"
+  | "PAPER_ENDED"
+  | "PLAYER_ALREADY_SUBMITTED"
   | "INVALID_OPTION"
   | "INVALID_TRANSITION"
   | "INTERNAL_ERROR"
@@ -77,12 +77,11 @@ export const errors = {
   invalidSession: (msg = "Invalid or expired session") =>
     new AppError("INVALID_SESSION", msg, 401),
   gameFinished: (msg = "Game has already finished") => new AppError("GAME_FINISHED", msg, 409),
-  questionNotActive: (msg = "No question is currently active") =>
-    new AppError("QUESTION_NOT_ACTIVE", msg, 409),
-  alreadyAnswered: (msg = "You already answered this question") =>
-    new AppError("ALREADY_ANSWERED", msg, 409),
-  answerTooLate: (msg = "Answer submitted after the deadline") =>
-    new AppError("ANSWER_TOO_LATE", msg, 409),
+  paperNotActive: (msg = "The paper is not currently active") =>
+    new AppError("PAPER_NOT_ACTIVE", msg, 409),
+  paperEnded: (msg = "The paper has already ended") => new AppError("PAPER_ENDED", msg, 409),
+  alreadySubmitted: (msg = "You already submitted your paper") =>
+    new AppError("PLAYER_ALREADY_SUBMITTED", msg, 409),
   invalidOption: (msg = "Option does not belong to this question") =>
     new AppError("INVALID_OPTION", msg, 400),
   invalidTransition: (msg = "Invalid game state transition") =>

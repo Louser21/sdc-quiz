@@ -1,24 +1,15 @@
 import { z } from "zod";
 import {
   HostGameStateView,
-  HostQuestionResult,
-  HostQuestionView,
   LeaderboardEntry,
   PlayerGameStateView,
   PlayerLobbyEntry,
-  PlayerQuestionResult,
-  QuestionPayload,
+  PlayerScorecard,
 } from "./types.js";
-import { ID_SCHEMA, JOIN_CODE_SCHEMA, NICKNAME_SCHEMA } from "./constants.js";
+import { ID_SCHEMA, JOIN_CODE_SCHEMA } from "./constants.js";
 
 /** Optional idempotency key for host commands. Same runId + same command => no-op. */
 export const RUN_ID = z.string().min(8).max(64).optional();
-
-export const PlayerJoinEvent = z.object({
-  gameCode: JOIN_CODE_SCHEMA,
-  nickname: NICKNAME_SCHEMA,
-});
-export type PlayerJoinEvent = z.infer<typeof PlayerJoinEvent>;
 
 export const PlayerSyncEvent = z.object({});
 export type PlayerSyncEvent = z.infer<typeof PlayerSyncEvent>;
@@ -26,37 +17,36 @@ export type PlayerSyncEvent = z.infer<typeof PlayerSyncEvent>;
 export const PlayerHeartbeatEvent = z.object({});
 export type PlayerHeartbeatEvent = z.infer<typeof PlayerHeartbeatEvent>;
 
-export const PlayerSubmitAnswerEvent = z.object({
+export const PlayerSetAnswerEvent = z.object({
   gameId: ID_SCHEMA,
   questionId: ID_SCHEMA,
   optionId: ID_SCHEMA,
 });
-export type PlayerSubmitAnswerEvent = z.infer<typeof PlayerSubmitAnswerEvent>;
+export type PlayerSetAnswerEvent = z.infer<typeof PlayerSetAnswerEvent>;
 
-export const HostStartQuestionEvent = z.object({
+export const PlayerMarkReviewEvent = z.object({
   gameId: ID_SCHEMA,
   questionId: ID_SCHEMA,
-  runId: RUN_ID,
+  marked: z.boolean(),
 });
-export type HostStartQuestionEvent = z.infer<typeof HostStartQuestionEvent>;
+export type PlayerMarkReviewEvent = z.infer<typeof PlayerMarkReviewEvent>;
 
-export const HostEndQuestionEvent = z.object({
+export const PlayerSubmitPaperEvent = z.object({
+  gameId: ID_SCHEMA,
+});
+export type PlayerSubmitPaperEvent = z.infer<typeof PlayerSubmitPaperEvent>;
+
+export const HostStartPaperEvent = z.object({
   gameId: ID_SCHEMA,
   runId: RUN_ID,
 });
-export type HostEndQuestionEvent = z.infer<typeof HostEndQuestionEvent>;
+export type HostStartPaperEvent = z.infer<typeof HostStartPaperEvent>;
 
-export const HostNextQuestionEvent = z.object({
+export const HostEndPaperEvent = z.object({
   gameId: ID_SCHEMA,
   runId: RUN_ID,
 });
-export type HostNextQuestionEvent = z.infer<typeof HostNextQuestionEvent>;
-
-export const HostEndGameEvent = z.object({
-  gameId: ID_SCHEMA,
-  runId: RUN_ID,
-});
-export type HostEndGameEvent = z.infer<typeof HostEndGameEvent>;
+export type HostEndPaperEvent = z.infer<typeof HostEndPaperEvent>;
 
 export const HostSyncEvent = z.object({});
 export type HostSyncEvent = z.infer<typeof HostSyncEvent>;
@@ -72,14 +62,13 @@ export type HostJoinGameEvent = z.infer<typeof HostJoinGameEvent>;
  * its schema before the handler runs. Unknown/ill-shaped events are rejected.
  */
 export const CLIENT_EVENTS = {
-  "player:join": PlayerJoinEvent,
   "player:sync": PlayerSyncEvent,
   "player:heartbeat": PlayerHeartbeatEvent,
-  "player:submit-answer": PlayerSubmitAnswerEvent,
-  "host:start-question": HostStartQuestionEvent,
-  "host:end-question": HostEndQuestionEvent,
-  "host:next-question": HostNextQuestionEvent,
-  "host:end-game": HostEndGameEvent,
+  "player:set-answer": PlayerSetAnswerEvent,
+  "player:mark-review": PlayerMarkReviewEvent,
+  "player:submit-paper": PlayerSubmitPaperEvent,
+  "host:start-paper": HostStartPaperEvent,
+  "host:end-paper": HostEndPaperEvent,
   "host:join-game": HostJoinGameEvent,
   "host:sync": HostSyncEvent,
 } as const;
@@ -93,18 +82,13 @@ export type ClientEventPayload<T extends ClientEventName> = z.infer<
 // Server -> client events
 // ---------------------------------------------------------------------------
 
-export const GameQuestionResultEvent = z.object({
+export const PlayerSetAnswerAckEvent = z.object({
   questionId: ID_SCHEMA,
-  correctOptionId: ID_SCHEMA,
-});
-
-export const PlayerAnswerAckEvent = z.object({
-  questionId: ID_SCHEMA,
+  optionId: ID_SCHEMA,
   accepted: z.boolean(),
   reason: z.string().optional(),
-  answerCount: z.number().int().min(0),
 });
-export type PlayerAnswerAckEvent = z.infer<typeof PlayerAnswerAckEvent>;
+export type PlayerSetAnswerAckEvent = z.infer<typeof PlayerSetAnswerAckEvent>;
 
 export const GameFinishedEvent = z.object({
   gameId: ID_SCHEMA,
@@ -114,19 +98,20 @@ export const GameFinishedEvent = z.object({
 });
 export type GameFinishedEvent = z.infer<typeof GameFinishedEvent>;
 
-export const HostQuestionResultEvent = z.object({
-  questionId: ID_SCHEMA,
-  correctOptionId: ID_SCHEMA,
-  optionCounts: z.array(z.object({ optionId: ID_SCHEMA, count: z.number().int().min(0) })),
-  answerCount: z.number().int().min(0),
-  leaderboard: z.array(LeaderboardEntry),
+export const HostPaperStartedEvent = z.object({
+  gameId: ID_SCHEMA,
+  timeLimitSeconds: z.number().int().positive(),
+  paperStartedAt: z.number().int().positive(),
+  deadline: z.number().int().positive(),
 });
-export type HostQuestionResultEvent = z.infer<typeof HostQuestionResultEvent>;
+export type HostPaperStartedEvent = z.infer<typeof HostPaperStartedEvent>;
 
-export const HostAnswerCountEvent = z.object({
-  questionId: ID_SCHEMA,
-  answerCount: z.number().int().min(0),
+export const HostPlayerSubmittedEvent = z.object({
+  playerId: ID_SCHEMA,
+  nickname: z.string().min(1).max(24),
+  submittedCount: z.number().int().min(0),
 });
+export type HostPlayerSubmittedEvent = z.infer<typeof HostPlayerSubmittedEvent>;
 
 export const HostGameFinishedEvent = z.object({
   gameId: ID_SCHEMA,
@@ -148,16 +133,13 @@ export type SocketErrorEvent = z.infer<typeof SocketErrorEvent>;
  */
 export const SERVER_EVENTS = {
   "player:state": PlayerGameStateView,
-  "player:answer-ack": PlayerAnswerAckEvent,
-  "player:question-result": PlayerQuestionResult,
-  "game:question": QuestionPayload,
-  "game:question-result": GameQuestionResultEvent,
+  "player:set-answer-ack": PlayerSetAnswerAckEvent,
+  "player:scorecard": PlayerScorecard,
   "game:finished": GameFinishedEvent,
   "host:state": HostGameStateView,
-  "host:question-started": HostQuestionView,
-  "host:question-result": HostQuestionResultEvent,
-  "host:answer-count": HostAnswerCountEvent,
+  "host:paper-started": HostPaperStartedEvent,
   "host:player-updated": PlayerLobbyEntry,
+  "host:player-submitted": HostPlayerSubmittedEvent,
   "host:game-finished": HostGameFinishedEvent,
   "error": SocketErrorEvent,
 } as const;

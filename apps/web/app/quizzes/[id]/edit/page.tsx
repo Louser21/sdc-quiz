@@ -23,6 +23,7 @@ export default function QuizEditorPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [timeLimitSeconds, setTimeLimitSeconds] = useState(600);
   const [status, setStatus] = useState("");
   const [questions, setQuestions] = useState<EditorQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +38,7 @@ export default function QuizEditorPage() {
       const res = await api<{ quiz: QuizDetailDto }>(`/api/quizzes/${id}`);
       setTitle(res.quiz.title);
       setDescription(res.quiz.description ?? "");
+      setTimeLimitSeconds(res.quiz.timeLimitSeconds);
       setStatus(res.quiz.status);
       setQuestions(
         res.quiz.questions.map((q) => ({ ...q, dirty: false })),
@@ -61,9 +63,18 @@ export default function QuizEditorPage() {
     e.preventDefault();
     setError(null);
     try {
+      const minutes = Number(timeLimitSeconds) / 60;
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 120) {
+        setError("Total time must be between 1 and 120 minutes");
+        return;
+      }
       await api(`/api/quizzes/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ title, description: description || undefined }),
+        body: JSON.stringify({
+          title,
+          description: description || undefined,
+          timeLimitSeconds,
+        }),
       });
       flash("Quiz details saved");
       await load();
@@ -106,7 +117,6 @@ export default function QuizEditorPage() {
     }
     const body = {
       text: q.text,
-      timeLimit: q.timeLimit,
       options: q.options.map((o) => ({ text: o.text, isCorrect: o.isCorrect })),
     };
     setSaving(true);
@@ -167,7 +177,7 @@ export default function QuizEditorPage() {
   function addQuestion() {
     setQuestions((qs) => [
       ...qs,
-      { id: "", text: "", position: qs.length, timeLimit: 20, options: [blankOption(), blankOption()], dirty: false },
+      { id: "", text: "", position: qs.length, options: [blankOption(), blankOption()], dirty: false },
     ]);
   }
 
@@ -215,6 +225,22 @@ export default function QuizEditorPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </Field>
+            <Field label="Total time for the paper (minutes)">
+              <Input
+                type="number"
+                min={1}
+                max={120}
+                step={1}
+                value={Math.round(timeLimitSeconds / 60)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const mins = Number(e.target.value);
+                  setTimeLimitSeconds(Number.isFinite(mins) && mins > 0 ? Math.max(60, mins * 60) : 60);
+                }}
+              />
+              <p className="text-xs text-zinc-600">
+                Everyone gets this long to answer the whole paper (60 s – 120 min). Default 10 minutes.
+              </p>
+            </Field>
             <div>
               <Button type="submit">Save details</Button>
             </div>
@@ -246,22 +272,13 @@ export default function QuizEditorPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
+              <div className="grid gap-4">
                 <Field label="Question text">
                   <Input
                     value={q.text}
                     maxLength={500}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => patchQuestion(i, { text: e.target.value })}
                     placeholder="What is the capital of France?"
-                  />
-                </Field>
-                <Field label="Time limit (s)">
-                  <Input
-                    type="number"
-                    min={3}
-                    max={600}
-                    value={q.timeLimit}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => patchQuestion(i, { timeLimit: Number(e.target.value) || 3 })}
                   />
                 </Field>
               </div>

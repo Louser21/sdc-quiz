@@ -2,6 +2,31 @@ import type { QuizCreateDto, QuizDetailDto, QuizSummaryDto, QuizUpdateDto } from
 import { prisma } from "../db/client.js";
 import { AppError, isForeignKeyViolation } from "../errors/index.js";
 
+function toSummary(
+  q: {
+    id: string;
+    title: string;
+    description: string;
+    status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+    timeLimitSeconds: number;
+    _count?: { questions: number };
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  questionCount?: number,
+): QuizSummaryDto {
+  return {
+    id: q.id,
+    title: q.title,
+    description: q.description,
+    status: q.status,
+    timeLimitSeconds: q.timeLimitSeconds,
+    questionCount: questionCount ?? q._count?.questions ?? 0,
+    createdAt: q.createdAt.toISOString(),
+    updatedAt: q.updatedAt.toISOString(),
+  };
+}
+
 async function getOwned(quizId: string, userId: string) {
   const quiz = await prisma.quiz.findUnique({ where: { id: quizId } });
   if (!quiz) throw new AppError("NOT_FOUND", "Quiz not found", 404);
@@ -22,6 +47,7 @@ export async function listQuizzes(userId: string): Promise<QuizSummaryDto[]> {
     title: q.title,
     description: q.description,
     status: q.status,
+    timeLimitSeconds: q.timeLimitSeconds,
     questionCount: q._count.questions,
     createdAt: q.createdAt.toISOString(),
     updatedAt: q.updatedAt.toISOString(),
@@ -30,17 +56,14 @@ export async function listQuizzes(userId: string): Promise<QuizSummaryDto[]> {
 
 export async function createQuiz(userId: string, dto: QuizCreateDto): Promise<QuizSummaryDto> {
   const quiz = await prisma.quiz.create({
-    data: { title: dto.title, description: dto.description, creatorId: userId },
+    data: {
+      title: dto.title,
+      description: dto.description,
+      timeLimitSeconds: dto.timeLimitSeconds,
+      creatorId: userId,
+    },
   });
-  return {
-    id: quiz.id,
-    title: quiz.title,
-    description: quiz.description,
-    status: quiz.status,
-    questionCount: 0,
-    createdAt: quiz.createdAt.toISOString(),
-    updatedAt: quiz.updatedAt.toISOString(),
-  };
+  return toSummary(quiz, 0);
 }
 
 export async function getQuizDetail(userId: string, quizId: string): Promise<QuizDetailDto> {
@@ -55,13 +78,13 @@ export async function getQuizDetail(userId: string, quizId: string): Promise<Qui
     title: quiz.title,
     description: quiz.description,
     status: quiz.status,
+    timeLimitSeconds: quiz.timeLimitSeconds,
     createdAt: quiz.createdAt.toISOString(),
     updatedAt: quiz.updatedAt.toISOString(),
     questions: questions.map((q) => ({
       id: q.id,
       text: q.text,
       position: q.position,
-      timeLimit: q.timeLimit,
       options: q.options.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
     })),
   };
@@ -79,18 +102,11 @@ export async function updateQuiz(
       ...(dto.title !== undefined ? { title: dto.title } : {}),
       ...(dto.description !== undefined ? { description: dto.description } : {}),
       ...(dto.status !== undefined ? { status: dto.status } : {}),
+      ...(dto.timeLimitSeconds !== undefined ? { timeLimitSeconds: dto.timeLimitSeconds } : {}),
     },
     include: { _count: { select: { questions: true } } },
   });
-  return {
-    id: updated.id,
-    title: updated.title,
-    description: updated.description,
-    status: updated.status,
-    questionCount: updated._count.questions,
-    createdAt: updated.createdAt.toISOString(),
-    updatedAt: updated.updatedAt.toISOString(),
-  };
+  return toSummary(updated);
 }
 
 export async function deleteQuiz(userId: string, quizId: string): Promise<void> {
@@ -132,6 +148,7 @@ export async function duplicateQuiz(userId: string, quizId: string): Promise<Qui
         title: `${source.title} (copy)`,
         description: source.description,
         status: "DRAFT",
+        timeLimitSeconds: source.timeLimitSeconds,
         creatorId: userId,
       },
     });
@@ -141,7 +158,6 @@ export async function duplicateQuiz(userId: string, quizId: string): Promise<Qui
           quizId: newQuiz.id,
           text: q.text,
           position: q.position,
-          timeLimit: q.timeLimit,
           options: {
             create: q.options.map((o) => ({
               text: o.text,
@@ -155,13 +171,5 @@ export async function duplicateQuiz(userId: string, quizId: string): Promise<Qui
     return newQuiz;
   });
 
-  return {
-    id: copy.id,
-    title: copy.title,
-    description: copy.description,
-    status: copy.status,
-    questionCount: questions.length,
-    createdAt: copy.createdAt.toISOString(),
-    updatedAt: copy.updatedAt.toISOString(),
-  };
+  return toSummary(copy, questions.length);
 }

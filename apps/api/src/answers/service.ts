@@ -1,36 +1,50 @@
-import type { StoredAnswer } from "../game/store.js";
 import { prisma } from "../db/client.js";
 import { getLogger } from "../logging/logger.js";
 
 /**
- * Background PostgreSQL persistence for live-game results.
- * Gameplay never blocks on these writes — they run after the question ends /
- * game finishes and are logged on failure (never silently swallowed).
+ * Background PostgreSQL persistence for CBT-paper results.
+ * Gameplay never blocks on these writes — they run after a paper is submitted
+ * (voluntarily or at the deadline) and are logged on failure (never silently
+ * swallowed). Redis remains the authoritative live state.
  */
 
-export async function persistQuestionResults(data: {
-  gameId: string;
+export interface SubmittedPaperRow {
   questionId: string;
-  correctOptionId: string;
-  answers: StoredAnswer[];
-  scores: Map<string, number>;
-}): Promise<void> {
-  const rows = data.answers.map((a) => ({
-    gameId: data.gameId,
-    questionId: data.questionId,
-    playerId: a.playerId,
-    optionId: a.optionId,
-    isCorrect: a.optionId === data.correctOptionId,
-    points: a.points,
-    submittedAt: new Date(a.ts),
+  optionId: string;
+  isCorrect: boolean;
+  points: number;
+}
+
+export interface SubmittedPaper {
+  gameId: string;
+  playerId: string;
+  submittedAt: number;
+  rows: SubmittedPaperRow[];
+}
+
+/** Persist one submitted paper: answer rows + the player's final score. */
+export async function persistSubmittedPaper(paper: SubmittedPaper): Promise<void> {
+  const answerRows = paper.rows.map((r) => ({
+    gameId: paper.gameId,
+    questionId: r.questionId,
+    playerId: paper.playerId,
+    optionId: r.optionId,
+    isCorrect: r.isCorrect,
+    points: r.points,
+    submittedAt: new Date(paper.submittedAt),
   }));
-  if (rows.length > 0) {
+  const score = paper.rows.reduce((s, r) => s + r.points, 0);
+
+  if (answerRows.length > 0) {
     await prisma.answer.createMany({
-      data: rows,
+      data: answerRows,
       skipDuplicates: true, // (gameId, playerId, questionId) unique — idempotent retries
     });
   }
-  await syncScores(data.gameId, data.scores);
+  await prisma.player.update({
+    where: { id: paper.playerId },
+    data: { score },
+  });
 }
 
 /** Keep PG player scores in sync with the authoritative Redis scores (diffs only). */
@@ -62,9 +76,12 @@ export async function persistFinalResults(gameId: string, scores: Map<string, nu
 }
 
 /** Fire-and-forget wrapper used by the socket layer: logs, never crashes. */
-export function persistQuestionResultsBackground(data: Parameters<typeof persistQuestionResults>[0]): void {
-  void persistQuestionResults(data).catch((err) => {
-    getLogger().error({ err: err instanceof Error ? err.message : String(err), ...data }, "persist question results failed");
+export function persistSubmittedPaperBackground(paper: SubmittedPaper): void {
+  void persistSubmittedPaper(paper).catch((err) => {
+    getLogger().error(
+      { err: err instanceof Error ? err.message : String(err), gameId: paper.gameId, playerId: paper.playerId },
+      "persist submitted paper failed",
+    );
   });
 }
 

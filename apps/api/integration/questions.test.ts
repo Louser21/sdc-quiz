@@ -14,7 +14,6 @@ afterAll(async () => {
 
 const VALID_QUESTION = {
   text: "What is 2 + 2?",
-  timeLimit: 20,
   options: [
     { text: "3", isCorrect: false },
     { text: "4", isCorrect: true },
@@ -75,7 +74,6 @@ describe("question CRUD", () => {
       url: `/api/questions/${questionId}`,
       payload: {
         text: "Updated question",
-        timeLimit: 30,
         options: [
           { text: "x", isCorrect: true },
           { text: "y", isCorrect: false },
@@ -87,7 +85,6 @@ describe("question CRUD", () => {
     expect(updated.statusCode).toBe(200);
     const q = JSON.parse(updated.body).question;
     expect(q.text).toBe("Updated question");
-    expect(q.timeLimit).toBe(30);
     expect(q.options).toHaveLength(3);
     expect(q.options[0]?.isCorrect).toBe(true);
   });

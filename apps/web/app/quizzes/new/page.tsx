@@ -12,6 +12,7 @@ export default function NewQuizPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState(10);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -22,7 +23,11 @@ export default function NewQuizPage() {
     try {
       const res = await api<{ quiz: QuizSummaryDto }>("/api/quizzes", {
         method: "POST",
-        body: JSON.stringify({ title, description: description || undefined }),
+        body: JSON.stringify({
+          title,
+          description: description || undefined,
+          timeLimitSeconds: timeLimitMinutes * 60,
+        }),
       });
       router.replace(`/quizzes/${res.quiz.id}/edit`);
     } catch (err) {
@@ -54,8 +59,19 @@ export default function NewQuizPage() {
                 value={description}
                 maxLength={280}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="A fun quick-fire round"
+                placeholder="JEE-Mains-style MCQ paper"
               />
+            </Field>
+            <Field label="Total time for the paper (minutes)">
+              <Input
+                type="number"
+                min={1}
+                max={120}
+                step={1}
+                value={timeLimitMinutes}
+                onChange={(e) => setTimeLimitMinutes(Number(e.target.value) || 10)}
+              />
+              <p className="text-xs text-zinc-600">You can change this later in the editor.</p>
             </Field>
             <div className="flex gap-3">
               <Button variant="ghost" type="button" onClick={() => router.push("/dashboard")}>

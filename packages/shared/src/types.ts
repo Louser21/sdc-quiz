@@ -7,20 +7,21 @@ export const OptionView = z.object({
   id: ID_SCHEMA,
   text: z.string().min(1).max(500),
 });
+export type OptionView = z.infer<typeof OptionView>;
 
 /**
- * What a player sees when a question starts. NEVER contains correctness info.
+ * One question on the paper, as a participant sees it. NEVER contains
+ * correctness info — the correct-answer map is server-private until a player
+ * submits their paper.
  */
-export const QuestionPayload = z.object({
+export const PaperQuestionView = z.object({
   questionId: ID_SCHEMA,
   questionNumber: z.number().int().min(1),
   totalQuestions: z.number().int().min(1),
   text: z.string().min(1).max(2000),
   options: z.array(OptionView).min(2).max(10),
-  timeLimit: z.number().int().min(3).max(600),
-  questionEndsAt: z.number().int().positive(),
 });
-export type QuestionPayload = z.infer<typeof QuestionPayload>;
+export type PaperQuestionView = z.infer<typeof PaperQuestionView>;
 
 export const LeaderboardEntry = z.object({
   playerId: ID_SCHEMA,
@@ -33,23 +34,18 @@ export const PlayerLobbyEntry = z.object({
   playerId: ID_SCHEMA,
   nickname: z.string().min(1).max(24),
   connected: z.boolean(),
+  submitted: z.boolean().default(false),
 });
 export type PlayerLobbyEntry = z.infer<typeof PlayerLobbyEntry>;
 
-const PlayerQuestionView = QuestionPayload.extend({
-  alreadyAnswered: z.boolean(),
-  selectedOptionId: ID_SCHEMA.nullable(),
+export const PlayerScorecard = z.object({
+  submitted: z.literal(true),
+  submittedAt: z.number().int().positive(),
+  correctCount: z.number().int().min(0),
+  totalQuestions: z.number().int().min(0),
+  score: z.number().int().min(0),
 });
-
-export const PlayerQuestionResult = z.object({
-  questionId: ID_SCHEMA,
-  correctOptionId: ID_SCHEMA,
-  selectedOptionId: ID_SCHEMA.nullable(),
-  points: z.number().int(),
-  isCorrect: z.boolean(),
-  totalPoints: z.number().int(),
-});
-export type PlayerQuestionResult = z.infer<typeof PlayerQuestionResult>;
+export type PlayerScorecard = z.infer<typeof PlayerScorecard>;
 
 export const PlayerGameStateView = z.object({
   gameId: ID_SCHEMA,
@@ -57,45 +53,32 @@ export const PlayerGameStateView = z.object({
   quizTitle: z.string(),
   phase: GamePhaseSchema,
   hostPresent: z.boolean(),
+  timeLimitSeconds: z.number().int().positive(),
+  paperStartedAt: z.number().int().positive().nullable(),
+  deadline: z.number().int().positive().nullable(),
   player: z.object({
     playerId: ID_SCHEMA,
     nickname: z.string().min(1).max(24),
-    totalPoints: z.number().int(),
+    submitted: z.boolean(),
   }),
-  currentQuestion: PlayerQuestionView.nullable(),
-  questionResult: PlayerQuestionResult.nullable(),
+  questions: z.array(PaperQuestionView),
+  selections: z.record(z.string(), ID_SCHEMA),
+  marked: z.record(z.string(), z.boolean()),
+  scorecard: PlayerScorecard.nullable(),
   leaderboard: z.array(LeaderboardEntry).nullable(),
 });
 export type PlayerGameStateView = z.infer<typeof PlayerGameStateView>;
-
-export const HostQuestionView = z.object({
-  questionId: ID_SCHEMA,
-  questionNumber: z.number().int().min(1),
-  totalQuestions: z.number().int().min(1),
-  text: z.string().min(1).max(2000),
-  timeLimit: z.number().int().min(3).max(600),
-  questionStartedAt: z.number().int().positive(),
-  questionEndsAt: z.number().int().positive(),
-  answerCount: z.number().int().min(0),
-});
-export type HostQuestionView = z.infer<typeof HostQuestionView>;
-
-export const HostQuestionResult = z.object({
-  questionId: ID_SCHEMA,
-  correctOptionId: ID_SCHEMA,
-  optionCounts: z.array(z.object({ optionId: ID_SCHEMA, count: z.number().int() })),
-  answerCount: z.number().int(),
-});
-export type HostQuestionResult = z.infer<typeof HostQuestionResult>;
 
 export const HostGameStateView = z.object({
   gameId: ID_SCHEMA,
   joinCode: JOIN_CODE_SCHEMA,
   phase: GamePhaseSchema,
   quizTitle: z.string(),
+  timeLimitSeconds: z.number().int().positive(),
+  paperStartedAt: z.number().int().positive().nullable(),
+  deadline: z.number().int().positive().nullable(),
   players: z.array(PlayerLobbyEntry),
-  currentQuestion: HostQuestionView.nullable(),
-  questionResult: HostQuestionResult.nullable(),
+  submittedCount: z.number().int().min(0),
   leaderboard: z.array(LeaderboardEntry),
 });
 export type HostGameStateView = z.infer<typeof HostGameStateView>;

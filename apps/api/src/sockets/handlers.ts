@@ -54,42 +54,58 @@ export function setupSocketServer(io: IoServer): void {
   const toRoom = emitterToRoom(io);
   const toSocket = emitterToSocket(io);
 
-  const questionTimers = new Map<string, NodeJS.Timeout>();
-  const answerCountTimers = new Map<string, NodeJS.Timeout>();
+  const paperTimers = new Map<string, NodeJS.Timeout>();
   const lastHeartbeat = new Map<string, number>();
 
-  function clearQuestionTimer(gameId: string): void {
-    const timer = questionTimers.get(gameId);
+  function clearPaperTimer(gameId: string): void {
+    const timer = paperTimers.get(gameId);
     if (timer) {
       clearTimeout(timer);
-      questionTimers.delete(gameId);
+      paperTimers.delete(gameId);
     }
   }
 
-  function clearAllTimersFor(gameId: string): void {
-    clearQuestionTimer(gameId);
-    const ac = answerCountTimers.get(gameId);
-    if (ac) {
-      clearTimeout(ac);
-      answerCountTimers.delete(gameId);
-    }
-  }
+  /** Server-authoritative paper end: auto-submit all, score, FINISHED, persist. */
+  async function finalizePaperFlow(gameId: string): Promise<void> {
+    const outcome = await hostGame.finalizePaper(gameId);
+    clearPaperTimer(gameId);
 
-  /** Server-authoritative question end: results → per-player results → persistence. */
-  async function endActiveQuestionFlow(gameId: string): Promise<void> {
-    const outcome = await hostGame.endActiveQuestion(gameId);
-    clearQuestionTimer(gameId);
+    const finishedPayload = {
+      gameId,
+      joinCode: outcome.joinCode,
+      quizTitle: outcome.quizTitle,
+      leaderboard: outcome.leaderboard,
+    };
+    toRoom(hostRoom(gameId))("host:game-finished", finishedPayload);
+    toRoom(gameRoom(gameId))("game:finished", finishedPayload);
 
-    toRoom(hostRoom(gameId))("host:question-result", outcome.result);
-    toRoom(gameRoom(gameId))("game:question-result", {
-      questionId: outcome.result.questionId,
-      correctOptionId: outcome.result.correctOptionId,
+    await pushPlayerStates(gameId);
+
+    logGame("PAPER_FINISHED", {
+      gameId,
+      submitted: outcome.papers.length,
+      leaderSize: outcome.leaderboard.length,
     });
+  }
 
-    // Per-player personal results (their selection + points against the shared answer).
-    const players = await store.getPlayers(gameId);
+  function schedulePaperTimer(gameId: string, deadline: number): void {
+    clearPaperTimer(gameId);
+    const delay = Math.max(0, deadline - Date.now()) + 50;
+    paperTimers.set(
+      gameId,
+      setTimeout(() => {
+        paperTimers.delete(gameId);
+        void finalizePaperFlow(gameId).catch((err) =>
+          getLogger().error({ err: err instanceof Error ? err.message : String(err), gameId }, "auto finalize paper failed"),
+        );
+      }, delay),
+    );
+  }
+
+  /** Re-send the latest server view to every connected player's sockets. */
+  async function pushPlayerStates(gameId: string): Promise<void> {
     const sockets = await io.in(gameRoom(gameId)).fetchSockets();
-    const byPlayer = new Map<string, (typeof sockets)[number][]>();
+    const byPlayer = new Map<string, typeof sockets>();
     for (const s of sockets) {
       if (typeof s.data.playerId === "string") {
         const list = byPlayer.get(s.data.playerId) ?? [];
@@ -97,63 +113,25 @@ export function setupSocketServer(io: IoServer): void {
         byPlayer.set(s.data.playerId, list);
       }
     }
-    for (const [playerId, list] of byPlayer) {
-      const answer = outcome.answers.find((a) => a.playerId === playerId);
-      const total = players[playerId]?.score ?? 0;
-      const payload = {
-        questionId: outcome.result.questionId,
-        correctOptionId: outcome.result.correctOptionId,
-        selectedOptionId: answer?.optionId ?? null,
-        points: answer?.points ?? 0,
-        isCorrect: answer !== undefined && answer.optionId === outcome.result.correctOptionId,
-        totalPoints: total,
-      };
-      for (const s of list) {
-        toSocket(s.id)("player:question-result", payload);
+    for (const playerId of byPlayer.keys()) {
+      try {
+        const view = await buildPlayerState(gameId, playerId);
+        for (const s of byPlayer.get(playerId) ?? []) {
+          toSocket(s.id)("player:state", view);
+        }
+      } catch (err) {
+        getLogger().warn(
+          { err: err instanceof Error ? err.message : String(err), gameId, playerId },
+          "push player state failed",
+        );
       }
     }
-
-    logGame("QUESTION_RESULTS_SENT", {
-      gameId,
-      questionId: outcome.result.questionId,
-      answerCount: outcome.result.answerCount,
-    });
-  }
-
-  function scheduleQuestionTimer(gameId: string, endsAt: number): void {
-    clearQuestionTimer(gameId);
-    const delay = Math.max(0, endsAt - Date.now()) + 50;
-    questionTimers.set(
-      gameId,
-      setTimeout(() => {
-        questionTimers.delete(gameId);
-        void endActiveQuestionFlow(gameId).catch((err) =>
-          getLogger().error({ err: err instanceof Error ? err.message : String(err), gameId }, "auto end question failed"),
-        );
-      }, delay),
-    );
-  }
-
-  /** Coalesce answer-count updates to the host (bursts of answers -> one event). */
-  function scheduleAnswerCount(gameId: string, questionId: string, answerCount: number): void {
-    const existing = answerCountTimers.get(gameId);
-    if (existing) clearTimeout(existing);
-    answerCountTimers.set(
-      gameId,
-      setTimeout(() => {
-        answerCountTimers.delete(gameId);
-        toRoom(hostRoom(gameId))("host:answer-count", { questionId, answerCount });
-      }, 150),
-    );
   }
 
   async function requireHostOwnedGame(
     socket: Socket,
     gameId: string,
-  ): Promise<{
-    state: store.GameStateRow;
-    ownerName: string;
-  }> {
+  ): Promise<{ state: store.GameStateRow; ownerName: string }> {
     if (!socket.data.hostUserId) throw errors.unauthorized("Host authentication required");
     const state = await store.getState(gameId);
     if (!state) throw errors.invalidGameCode("Game is not available");
@@ -161,41 +139,9 @@ export function setupSocketServer(io: IoServer): void {
     return { state, ownerName: state.hostUserId };
   }
 
-  /** Emit the question to both player and host rooms after a successful start. */
-  async function broadcastStartedQuestion(gameId: string): Promise<void> {
-    const state = await store.getState(gameId);
-    if (!state?.currentQuestionId || !state.questionEndsAt) throw errors.questionNotActive();
-    const questions = await store.getQuestions(gameId);
-    const question = questions.list.find((q) => q.id === state.currentQuestionId);
-    if (!question) throw errors.internal("Started question not in snapshot");
-
-    toRoom(gameRoom(gameId))("game:question", {
-      questionId: question.id,
-      questionNumber: state.questionNumber,
-      totalQuestions: state.totalQuestions,
-      text: question.text,
-      options: question.options.map((o) => ({ id: o.id, text: o.text })),
-      timeLimit: question.timeLimit,
-      questionEndsAt: state.questionEndsAt,
-    });
-
-    toRoom(hostRoom(gameId))("host:question-started", {
-      questionId: question.id,
-      questionNumber: state.questionNumber,
-      totalQuestions: state.totalQuestions,
-      text: question.text,
-      timeLimit: question.timeLimit,
-      questionStartedAt: state.questionStartedAt ?? 0,
-      questionEndsAt: state.questionEndsAt,
-      answerCount: 0,
-    });
-
-    scheduleQuestionTimer(gameId, state.questionEndsAt);
-  }
-
   // -------------------------------------------------------------------------
-  // Restart recovery: hand into any restored QUESTION_ACTIVE games the timers
-  // that died with the previous process (state itself lives in Redis).
+  // Restart recovery: hand restored ACTIVE games their deadline timers (state
+  // itself lives in Redis and survives the restart).
   // -------------------------------------------------------------------------
   async function restoreActiveTimers(): Promise<void> {
     try {
@@ -203,10 +149,10 @@ export function setupSocketServer(io: IoServer): void {
       for (const gameId of ids) {
         const state = await store.getState(gameId);
         if (!state) continue;
-        if (state.phase === "QUESTION_ACTIVE" && state.questionEndsAt) {
-          scheduleQuestionTimer(gameId, state.questionEndsAt);
-          logGame("GAME_RESTORED", { gameId, questionId: state.currentQuestionId, endsAt: state.questionEndsAt });
-        } else if (state.phase !== "FINISHED") {
+        if (state.phase === "ACTIVE" && state.deadline) {
+          schedulePaperTimer(gameId, state.deadline);
+          logGame("GAME_RESTORED", { gameId, deadline: state.deadline });
+        } else if (state.phase !== "FINISHED" && state.phase !== "ACTIVE") {
           await store.setHostConnected(gameId, false);
         }
       }
@@ -258,6 +204,7 @@ export function setupSocketServer(io: IoServer): void {
             playerId,
             nickname: record?.nickname ?? "",
             connected: true,
+            submitted: record?.submitted ?? false,
           });
           await store.touchGame(gameId);
           logGame("PLAYER_CONNECTED", { gameId, playerId });
@@ -282,69 +229,37 @@ export function setupSocketServer(io: IoServer): void {
         await store.touchGame(data.gameId);
         const view = await buildHostState(data.gameId);
         toSocket(socket.id)("host:state", view);
-        logGame("HOST_CONNECTED", { gameId: data.gameId });
+        if (data.runId) logGame("HOST_CONNECTED", { gameId: data.gameId });
       } catch (err) {
         sendAppError(io, socket, err);
       }
     });
 
-    socket.on("host:start-question", async (payload: unknown) => {
+    socket.on("host:start-paper", async (payload: unknown) => {
       try {
-        const data = parseEvent("host:start-question", payload) as ClientEventPayload<"host:start-question">;
+        const data = parseEvent("host:start-paper", payload) as ClientEventPayload<"host:start-paper">;
         await requireHostOwnedGame(socket, data.gameId);
-        await hostGame.startQuestion(data.gameId, socket.data.hostUserId!, data.questionId);
-        await broadcastStartedQuestion(data.gameId);
+        const { state } = await hostGame.startPaper(data.gameId, socket.data.hostUserId!);
+        schedulePaperTimer(data.gameId, state.deadline!);
+        toRoom(hostRoom(data.gameId))("host:paper-started", {
+          gameId: data.gameId,
+          timeLimitSeconds: state.timeLimitSeconds,
+          paperStartedAt: state.paperStartedAt!,
+          deadline: state.deadline!,
+        });
+        await pushPlayerStates(data.gameId);
+        logGame("PAPER_STARTED", { gameId: data.gameId, deadline: state.deadline });
       } catch (err) {
         sendAppError(io, socket, err);
       }
     });
 
-    socket.on("host:next-question", async (payload: unknown) => {
+    socket.on("host:end-paper", async (payload: unknown) => {
       try {
-        const data = parseEvent("host:next-question", payload) as ClientEventPayload<"host:next-question">;
+        const data = parseEvent("host:end-paper", payload) as ClientEventPayload<"host:end-paper">;
         await requireHostOwnedGame(socket, data.gameId);
-        const nextId = await hostGame.nextQuestionId(data.gameId);
-        if (!nextId) {
-          const out = await hostGame.finishGame(data.gameId, socket.data.hostUserId!);
-          clearAllTimersFor(data.gameId);
-          const payloadOut = {
-            gameId: data.gameId,
-            joinCode: out.joinCode,
-            quizTitle: out.quizTitle,
-            leaderboard: out.leaderboard,
-          };
-          toRoom(hostRoom(data.gameId))("host:game-finished", payloadOut);
-          toRoom(gameRoom(data.gameId))("game:finished", payloadOut);
-          logGame("GAME_FINISHED", { gameId: data.gameId });
-          return;
-        }
-        await hostGame.startQuestion(data.gameId, socket.data.hostUserId!, nextId);
-        await broadcastStartedQuestion(data.gameId);
-      } catch (err) {
-        sendAppError(io, socket, err);
-      }
-    });
-
-    socket.on("host:end-question", async (payload: unknown) => {
-      try {
-        const data = parseEvent("host:end-question", payload) as ClientEventPayload<"host:end-question">;
-        await requireHostOwnedGame(socket, data.gameId);
-        await endActiveQuestionFlow(data.gameId);
-      } catch (err) {
-        sendAppError(io, socket, err);
-      }
-    });
-
-    socket.on("host:end-game", async (payload: unknown) => {
-      try {
-        const data = parseEvent("host:end-game", payload) as ClientEventPayload<"host:end-game">;
-        await requireHostOwnedGame(socket, data.gameId);
-        const out = await hostGame.finishGame(data.gameId, socket.data.hostUserId!);
-        clearAllTimersFor(data.gameId);
-        const payloadOut = { gameId: data.gameId, joinCode: out.joinCode, quizTitle: out.quizTitle, leaderboard: out.leaderboard };
-        toRoom(hostRoom(data.gameId))("host:game-finished", payloadOut);
-        toRoom(gameRoom(data.gameId))("game:finished", payloadOut);
-        logGame("GAME_FINISHED", { gameId: data.gameId });
+        await hostGame.endPaper(data.gameId, socket.data.hostUserId!);
+        await finalizePaperFlow(data.gameId);
       } catch (err) {
         sendAppError(io, socket, err);
       }
@@ -366,38 +281,92 @@ export function setupSocketServer(io: IoServer): void {
 
     // --- Player events ------------------------------------------------------
 
-    socket.on("player:submit-answer", async (payload: unknown) => {
+    socket.on("player:set-answer", async (payload: unknown) => {
       const identity = identifyPlayer(socket);
       if (!identity) {
-        toSocket(socket.id)("player:answer-ack", {
-          questionId: (payload as { questionId?: string })?.questionId ?? "",
+        const raw = payload as { questionId?: string; optionId?: string };
+        toSocket(socket.id)("player:set-answer-ack", {
+          questionId: raw.questionId ?? "",
+          optionId: raw.optionId ?? "",
           accepted: false,
           reason: "Your session is not attached to a game",
-          answerCount: 0,
         });
         return;
       }
       try {
-        const data = parseEvent("player:submit-answer", payload) as ClientEventPayload<"player:submit-answer">;
+        const data = parseEvent("player:set-answer", payload) as ClientEventPayload<"player:set-answer">;
         if (data.gameId !== identity.gameId) throw errors.invalidGameCode("Wrong game");
-        const out = await playerGame.submitAnswer(identity.gameId, identity.playerId, data.questionId, data.optionId);
-        toSocket(socket.id)("player:answer-ack", {
-          questionId: out.questionId,
+        await playerGame.setAnswer(identity.gameId, identity.playerId, data.questionId, data.optionId);
+        toSocket(socket.id)("player:set-answer-ack", {
+          questionId: data.questionId,
+          optionId: data.optionId,
           accepted: true,
-          answerCount: out.answerCount,
         });
-        scheduleAnswerCount(identity.gameId, data.questionId, out.answerCount);
-        logGame("ANSWER_ACCEPTED", { gameId: identity.gameId, playerId: identity.playerId, questionId: data.questionId, points: out.points });
+        logGame("SELECTION_SET", {
+          gameId: identity.gameId,
+          playerId: identity.playerId,
+          questionId: data.questionId,
+        });
       } catch (err) {
         const code = err instanceof AppError ? err.code : "INTERNAL_ERROR";
         const message = err instanceof Error ? err.message : "Internal error";
-        toSocket(socket.id)("player:answer-ack", {
-          questionId: (payload as { questionId?: string })?.questionId ?? "",
+        const raw = payload as { questionId?: string; optionId?: string };
+        toSocket(socket.id)("player:set-answer-ack", {
+          questionId: raw.questionId ?? "",
+          optionId: raw.optionId ?? "",
           accepted: false,
           reason: message,
-          answerCount: 0,
         });
-        logGame("ANSWER_REJECTED", { gameId: identity.gameId, playerId: identity.playerId, reason: code });
+        logGame("SELECTION_REJECTED", { gameId: identity.gameId, playerId: identity.playerId, reason: code });
+      }
+    });
+
+    socket.on("player:mark-review", async (payload: unknown) => {
+      const identity = identifyPlayer(socket);
+      if (!identity) {
+        toSocket(socket.id)("error", { code: "NOT_IN_GAME", message: "Join a game first" });
+        return;
+      }
+      try {
+        const data = parseEvent("player:mark-review", payload) as ClientEventPayload<"player:mark-review">;
+        if (data.gameId !== identity.gameId) throw errors.invalidGameCode("Wrong game");
+        await playerGame.setMarked(identity.gameId, identity.playerId, data.questionId, data.marked);
+      } catch (err) {
+        sendAppError(io, socket, err);
+      }
+    });
+
+    socket.on("player:submit-paper", async (payload: unknown) => {
+      const identity = identifyPlayer(socket);
+      if (!identity) {
+        toSocket(socket.id)("error", { code: "NOT_IN_GAME", message: "Join a game first" });
+        return;
+      }
+      try {
+        const data = parseEvent("player:submit-paper", payload) as ClientEventPayload<"player:submit-paper">;
+        if (data.gameId !== identity.gameId) throw errors.invalidGameCode("Wrong game");
+        const { scorecard } = await playerGame.submitPaper(identity.gameId, identity.playerId);
+        toSocket(socket.id)("player:scorecard", scorecard);
+
+        const record = await store.getPlayer(identity.gameId, identity.playerId);
+        const state = await store.getState(identity.gameId);
+        const players = await store.getPlayers(identity.gameId);
+        const submittedCount = Object.values(players).filter((p) => p.submitted).length;
+        toRoom(hostRoom(identity.gameId))("host:player-submitted", {
+          playerId: identity.playerId,
+          nickname: record?.nickname ?? "",
+          submittedCount,
+        });
+        await pushPlayerStates(identity.gameId);
+
+        // Natural end: everyone who joined has submitted.
+        const total = Object.keys(players).length;
+        if (total > 0 && submittedCount >= total && state?.phase === "ACTIVE") {
+          await finalizePaperFlow(identity.gameId);
+        }
+        logGame("PAPER_SUBMITTED", { gameId: identity.gameId, playerId: identity.playerId });
+      } catch (err) {
+        sendAppError(io, socket, err);
       }
     });
 
@@ -430,15 +399,6 @@ export function setupSocketServer(io: IoServer): void {
       }
     });
 
-    socket.on("player:join", async (_payload: unknown) => {
-      // Joining requires the httpOnly player cookie, which Socket.IO cannot set.
-      // Always go through POST /api/play/join first (REST), then reconnect.
-      toSocket(socket.id)("error", {
-        code: "JOIN_VIA_REST",
-        message: "Join through the game join page (setPlayerSessionCookie)",
-      });
-    });
-
     // --- Disconnect ---------------------------------------------------------
 
     socket.on("disconnect", () => {
@@ -456,6 +416,7 @@ export function setupSocketServer(io: IoServer): void {
               playerId: identity.playerId,
               nickname: record?.nickname ?? "",
               connected: samePlayer.length > 0,
+              submitted: record?.submitted ?? false,
             });
             logGame("PLAYER_DISCONNECTED", { gameId: identity.gameId, playerId: identity.playerId });
           } catch (err) {

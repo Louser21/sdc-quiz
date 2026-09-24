@@ -49,17 +49,18 @@ model User {
 }
 
 model Quiz {
-  id          String    @id @default(uuid())
-  title       String
-  description String    @default("")
-  status      QuizStatus @default(DRAFT)
-  creatorId   String
-  creator     User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  title           String
+  description     String    @default("")
+  status          QuizStatus @default(DRAFT)
+  creatorId       String
+  creator         User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  timeLimitSeconds Int       @default(600)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  questions    Question[]
-  gameSessions GameSession[]
+  questions        Question[]
+  gameSessions     GameSession[]
 
   @@index([creatorId])
 }
@@ -70,7 +71,6 @@ model Question {
   quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
   text      String
   position  Int
-  timeLimit Int      @default(20)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

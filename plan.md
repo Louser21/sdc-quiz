@@ -1,134 +1,132 @@
 # Quiz Live — Master Plan & Status Board
 
-Production-ready real-time quiz platform (Kahoot-style) for events and classrooms.
-Target: **1,000 concurrent players**, multiple rooms, hostile mobile networks.
+Real-time CBT-style MCQ paper platform (JEE-Mains style): a host runs a printed paper with a single
+global timer; participants answer the same paper independently, submit or get auto-submitted at the
+deadline, then see a final leaderboard. Target: **1,000 concurrent players**, hostile mobile networks.
 
 Priorities (in order): **CORRECTNESS > RELIABILITY > SECURITY > RECOVERABILITY > PERFORMANCE > FEATURES**.
 
-> Spec that drives everything: see the pinned project brief (§numbers below refer to it).
 > Convention/command manual for agents: see `skill.md`.
 
 ---
 
-## Definition of Done (spec §46) — live status
+## Definition of Done — live status
 
 Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 
-- [x] Quiz CRUD works
-- [x] Question CRUD works
+- [x] Quiz CRUD works (incl. quiz-level `timeLimitSeconds`, 60 s – 120 min)
+- [x] Question CRUD works (no per-question timers)
 - [x] Authentication works (host register/login, httpOnly sessions)
-- [ ] Host flow works
-- [ ] Player flow works
-- [ ] Game PIN works
-- [ ] Lobby works
-- [ ] WebSocket communication works
-- [ ] Server-authoritative timer works
-- [ ] Server-authoritative scoring works
-- [ ] Duplicate answers prevented
-- [ ] Late answers rejected
+- [x] Host flow works (lobby → start paper → submitted count + live results → end → FINISHED)
+- [x] Player flow works (paper: navigator, A–D options, mark-for-review, countdown, submit, scorecard)
+- [x] Game PIN works
+- [x] Lobby works (fresh joiners only while LOBBY; rejoin allowed through ACTIVE)
+- [x] WebSocket communication works (typed, zod-validated both directions)
+- [x] Server-authoritative timer works (global deadline; auto-submit on expiry)
+- [x] Server-authoritative scoring works (fixed points: `SCORE_BASE` per correct, 0 wrong)
+- [x] Duplicate answers prevented (atomic submit lock; PG unique `(gameId, playerId, questionId)`)
+- [x] Late answers rejected (`PAPER_ENDED` / `PLAYER_ALREADY_SUBMITTED`, enforced in Lua)
 - [ ] Reconnection works
 - [ ] Refresh recovery works
 - [ ] Network switching recovery tested
 - [ ] Host recovery works
-- [ ] Backend restart recovery tested
-- [ ] Unauthorized operations rejected
+- [~] Backend restart recovery (timer restore implemented; test pending)
+- [x] Unauthorized operations rejected (ownership + role separation)
 - [ ] Rate limiting enabled
-- [ ] Correct answers aren't exposed early
-- [ ] PostgreSQL persistence works
-- [ ] Redis live state works
+- [x] Correct answers aren't exposed early (never sent before submit)
+- [x] PostgreSQL persistence works (papers, scores, FINISHED sessions)
+- [x] Redis live state works
 - [ ] Backups configured
-- [ ] Health endpoints work
-- [ ] Structured logging works
+- [x] Health endpoints work
+- [x] Structured logging works
 - [ ] CI passes
 - [ ] Docker deployment works
 - [ ] Staging deployment works
 - [ ] Production deployment documented
-- [ ] 100-user load test passes
-- [ ] 500-user load test passes
-- [ ] 1,000-user load test passes
+- [ ] 100 / 500 / 1,000-user load tests pass
 - [ ] Reconnect storm tested
-- [ ] Simultaneous-answer test passes
-- [ ] Final result persistence verified
+- [ ] Simultaneous-submit race tested (Lua atomicity covers it; storm pending)
+- [x] Final result persistence verified
 
 ---
 
 ## Phase 0 — Scaffolding (DONE, commit `648cf35`)
 
 - Monorepo (npm workspaces): `apps/api` (Fastify + Socket.IO + Prisma 7 + ioredis), `apps/web` (Next.js), `packages/shared` (typed DTOs/events).
-- Prisma schema + migration: User, Session, Quiz, Question, Option, GameSession, Player, Answer; enums `QuizStatus`, `GameSessionStatus`, `PlayerStatus`, `UserRole`.
-- compose stack (postgres, redis, api, web, nginx on :8080), nginx single-origin reverse proxy, Dockerfiles, `.env.example`, Makefile, `docs/` skeleton.
-- API shell with `/api/health` + `/api/ready` (PG + Redis checks), Socket.IO attached, global config via zod.
+- Prisma schema + migration: User, Session, Quiz, Question, Option, GameSession, Player, Answer; enums.
+- compose stack (postgres, redis, api, web, nginx on :8080); API shell with `/api/health` + `/api/ready`.
 
 ## Phase 1 — Auth + Quiz/Question CRUD (DONE, commits `73952f0`, `866a201`, `853a950`)
 
-- Host auth: argon2id password hashing; random 32-byte session token, sha256 stored at rest, httpOnly `quiz_session` cookie; `register/login/logout/me`.
-- Quiz CRUD: list, create (201), get detail, update, delete, publish/unpublish, duplicate (deep copy incl. options).
-- Question CRUD: add, update (replace options), delete (P2003→CONFLICT), reorder (transactional positions).
-- Shared zod DTOs; integration tests (19 passing) against real PG + Redis.
-- Web host UI: dashboard, login/register, new quiz, editor (correct-answer radio, reorder, time limits); AuthProvider at root; `HostChrome` layout fix.
+- Host auth (argon2id, httpOnly session cookie); quiz CRUD incl. publish + duplicate; question CRUD incl. reorder.
+- Shared zod DTOs; integration tests; web host UI (dashboard, login/register, new quiz, editor).
 
-## Phase 2 — Game creation, join code, lobby, player sessions (IN PROGRESS)
+## Phase 2 — Game creation, join code, lobby, player sessions (DONE, commits in `git log`)
 
-- [ ] Shared: `SERVER_EVENTS` (typed server→client), game REST DTOs (`GameCreateDto`,
-      `GameSessionSummaryDto`, `PlayerJoinDto/Result`).
-- [ ] `config.ts`: `PLAYER_SESSION_COOKIE_NAME`.
-- [ ] `game/store.ts`: Redis live state + Lua state machine (see `skill.md`), questions snapshot + correct map.
-- [ ] `scoring/` (config-drive formula), `leaderboard/` (Redis sorted set), `answers/service.ts` (async PG persist).
-- [ ] `players/session.ts` + `players/service.ts`: httpOnly player cookie, REST join, nickname rules, rejoin.
-- [ ] `routes/games.routes.ts`, `routes/play.routes.ts`; register in `app.ts`.
-- [ ] `sockets/handlers.ts`: cookie auth on connect, host room + ownership, player auto-room, presence.
-- [ ] Web: `/play` client, `/games` + `/games/[id]/live` host, dashboard "Host".
-- [ ] Gate: typecheck + build + integration tests + smoke.
+- `SERVER_EVENTS` (typed), game REST DTOs, player session cookie + REST join with nickname rules + rejoin.
 
-## Phase 3 — Socket.IO state machine, questions, timers, answers, scoring, leaderboard
+## Phase 3 — CBT paper pivot: connected engine, UIs, tests (DONE)
 
-- [ ] `host:start-question` (strict order + `runId` idempotency), broadcast `game:question` (no correctness).
-- [ ] Server-authoritative timer (auto-end) wired to `questionEndsAt`.
-- [ ] `player:submit-answer`: atomic Lua (all checks), deadline boundary, duplicate protection (Redis + PG unique).
-- [ ] `host:end-question`/auto-end → results (host counts + correct, per-player personal result), async PG batch.
-- [ ] `host:end-game` → FINISHED, leaderboard persisted.
-- [ ] Web: player question/answer/results screens; host question/results/leaderboard screens.
-- [ ] Gate: unit (scoring, state machine, timer, join-code) + integration full game + E2E round.
+Product pivot from Kahoot live-question rounds to a JEE-Mains CBT-style paper. Migration
+`20260924120000_add_quiz_time_limit` drops `Question.timeLimit`, adds `Quiz.timeLimitSeconds` (DEFAULT 600).
+Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 
-## Phase 4 — Recovery (spec §19–26)
+- [x] Shared contracts rewritten (`constants.ts` `QUIZ_TIME_LIMIT_SCHEMA`, `GAME_PHASES`, `GAME_TRANSITIONS`;
+      `dto.ts`, `types.ts` `PaperQuestionView`/`PlayerGameStateView`/`HostGameStateView`/`PlayerScorecard`;
+      `events.ts` typed client/server registries).
+- [x] `game/store.ts`: Redis hash layout + Lua scripts — `startPaper` (LOBBY→ACTIVE w/ deadline),
+      `setAnswer`/`markReview` (ACTIVE + before deadline + not submitted), `submitPaper` (atomic lock,
+      idempotent), `autoSubmitRemaining`, `finishGame`.
+- [x] `game/host.ts`: `startPaper`, `endPaper`, `finalizePaper` (auto-submit all, score, FINISHED, persist,
+      samples leaderboard from post-score state).
+- [x] `game/player.ts`, `game/state.ts`: selection/mark/submit; full paper view (no correctness), scorecard,
+      host view.
+- [x] `answers/service.ts`: async PG persist of papers + final results; `players/service.ts` LOBBY-only fresh join.
+- [x] `sockets/handlers.ts`: deadline timers (`paperTimers`), `finalizePaperFlow`, natural early finish when all
+      submitted, boot-time `restoreActiveTimers`.
+- [x] Scoring: fixed points (`scoreForCorrectness`), `isWithinPaperDeadline(now < deadline)`.
+- [x] Web: quiz editor + new-quiz total-time field; host live console; player paper UI.
+- [x] Integration tests rewrite: full 2-question paper flow, natural early finish, real deadline auto-submit
+      (2 s paper via direct Redis tweak), persistence checks — 25 passing.
+- Gate: `typecheck` (shared→api→web) + `npm test -w @quiz/api` green.
 
-- [ ] Player reconnect on socket: cookie → player → game → full `PlayerGameStateView` (no fresh timer).
-- [ ] Refresh / sleep / network-switch recovery (same player/score, no dupes).
-- [ ] Host disconnect grace (`HOST_GRACE_PERIOD_MS`); host reconnect restores controls.
-- [ ] Backend-restart restore: boot `restoreActiveGames()` from Redis; graceful shutdown order.
+## Phase 4 — Recovery (IN PROGRESS)
+
+- [ ] Player reconnect on socket: cookie → player → game → full `PlayerGameStateView` (state already in Redis).
+- [ ] Refresh / sleep / network-switch recovery (same player/score/submission, no change allowed post-submit).
+- [ ] Host disconnect grace (`HOST_GRACE_PERIOD_MS`); host reconnect restores controls (current `host:state` push).
+- [ ] Backend-restart restore test (`restoreActiveTimers` implemented; add automated test).
 - [ ] Gate: reliability tests 1–10 automated.
 
 ## Phase 5 — Security, rate limiting, observability
 
-- [ ] Rate limits: login/join/quiz CRUD (HTTP), answers (socket token bucket), host commands.
+- [ ] Rate limits: login/join/quiz CRUD (HTTP), socket token bucket, host commands.
 - [ ] Host↔player role separation; ownership checks on every privileged op.
-- [ ] Structured `logGame` domain events (no secrets); `/metrics` (Prometheus text); `/health` + `/ready`.
-- [ ] Gate: security tests.
+- [ ] Structured `logGame` domain events; `/metrics` (Prometheus text); `/health` + `/ready`.
 
 ## Phase 6 — Docker, CI/CD, deployment, backups, docs
 
 - [ ] nginx TLS template + Cloudflare notes.
 - [ ] GitHub Actions CI (install→lint→typecheck→unit→integration→build→docker build).
-- [ ] `scripts/backup.sh` + `docs/database-backup.md`, **restore tested** on compose Postgres.
-- [ ] Full `docs/` set (architecture, local-development, staging-deployment, production-deployment,
-      disaster-recovery, load-testing, monitoring, troubleshooting, websocket-events, api).
+- [ ] `scripts/backup.sh` + `docs/database-backup.md`, restore tested on compose Postgres.
+- [ ] Full `docs/` set (architecture, local-development, staging, production, disaster-recovery,
+      load-testing, monitoring, troubleshooting, websocket-events, api).
 
 ## Phase 7 — Tests + load
 
-- [ ] Complete unit/integration coverage; E2E Playwright full host→player game + refresh recovery.
-- [ ] k6 WebSocket scenarios A–E, run 100 → 500 → 1000, record results in `docs/load-testing.md`;
-      fix bottlenecks and re-run.
+- [ ] Complete unit/integration coverage; Playwright E2E host→player paper + refresh recovery.
+- [ ] k6 WebSocket scenarios: join lobby → paper 1,000 → auto-submit finish; 100 → 500 → 1000; record in
+      `docs/load-testing.md`; fix bottlenecks and re-run.
 
 ## Phase 8 — Hardening + final report
 
-- [ ] Full §46 checklist; close gaps; `docs/final-report.md` (implemented, limitations+risks,
-      measured capacity, security checks, deployment, remaining risks).
+- [ ] Full §46 checklist; close gaps; `docs/final-report.md`.
 
 ---
 
 ## Milestone check-ins
 
-1. After Phase 3 gate (full game round-trip working).
+1. After Phase 3 gate (full paper round-trip working). — DONE (25 integration tests green)
 2. After Phase 4 (all recovery tests green).
 3. After load testing, before final report.
 
@@ -136,8 +134,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 
 - `apps/api/src/` — auth/, quizzes/, questions/, game/ (store, host, player, state), players/, answers/,
   scoring/, leaderboard/, sockets/ (handlers), rate-limit/, logging/, routes/, config.ts, app.ts, index.ts.
-- `apps/web/app/` — / (landing), /host, /dashboard, /quizzes, /games, /play.
+- `apps/web/app/` — / (landing), /host, /dashboard, /quizzes, /games, /play, /join.
 - `packages/shared/src/` — constants.ts, dto.ts, events.ts, types.ts, validate.ts.
-- `prisma/schema.prisma`, `apps/api/migrations/`.
+- `prisma/schema.prisma`, `prisma/migrations/`.
 - `infra/` — Dockerfiles + nginx. `load-tests/k6/`. `e2e/`. `.github/workflows/`.
 - `docs/` — production docs. `scripts/`.

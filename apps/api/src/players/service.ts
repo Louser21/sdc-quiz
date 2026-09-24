@@ -60,6 +60,12 @@ export async function joinGame(
   const rejoin =
     existing !== null && existing.gameId === session.id && session.status !== "FINISHED";
 
+  // Fresh joiners are welcome only while the paper is still in the lobby;
+  // returning devices keep re-joining throughout the paper to restore their state.
+  if (!rejoin && state.phase !== "LOBBY") {
+    throw errors.gameNotJoinable("That paper has already started");
+  }
+
   let playerId: string;
   let sessionId: string;
   let rejoined = rejoin;
@@ -102,12 +108,14 @@ export async function joinGame(
     setPlayerSessionCookie(reply, token);
   }
 
-  // Attach to the Redis lobby (preserve any existing score on rejoin).
+  // Attach to the Redis lobby (preserve any existing score/submission on rejoin).
   const existingRecord = await store.getPlayer(session.id, playerId);
   await store.upsertPlayer(session.id, playerId, {
     nickname: input.nickname,
     score: existingRecord?.score ?? 0,
     connected: true,
+    submitted: existingRecord?.submitted ?? false,
+    submittedAt: existingRecord?.submittedAt ?? null,
     joinedAt: existingRecord?.joinedAt ?? Date.now(),
   });
 
@@ -118,6 +126,7 @@ export async function joinGame(
       playerId,
       nickname: input.nickname,
       connected: true,
+      submitted: existingRecord?.submitted ?? false,
     });
 
   logGame(rejoined ? "PLAYER_REJOINED" : "PLAYER_JOINED", {

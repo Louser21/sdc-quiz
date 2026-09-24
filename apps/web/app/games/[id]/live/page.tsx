@@ -6,10 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   type GameSessionSummaryDto,
   type HostGameStateView,
-  type HostQuestionResult,
-  type HostQuestionView,
   type PlayerLobbyEntry,
-  type QuestionViewDto,
   type QuizDetailDto,
 } from "@quiz/shared";
 import { api, ApiError } from "../../../../lib/api";
@@ -19,8 +16,8 @@ import { HostChrome } from "../../../../components/chrome";
 import { getSocket } from "../../../../lib/socket";
 
 type HostCommand =
-  | { event: "host:start-question"; payload: { gameId: string; questionId: string; runId: string } }
-  | { event: "host:end-question" | "host:next-question" | "host:end-game"; payload: { gameId: string; runId: string } };
+  | { event: "host:start-paper"; payload: { gameId: string; runId: string } }
+  | { event: "host:end-paper"; payload: { gameId: string; runId: string } };
 
 export default function HostLivePage() {
   const params = useParams<{ id: string }>();
@@ -30,14 +27,9 @@ export default function HostLivePage() {
   const [game, setGame] = useState<GameSessionSummaryDto | null>(null);
   const [quiz, setQuiz] = useState<QuizDetailDto | null>(null);
   const [state, setState] = useState<HostGameStateView | null>(null);
-  const [lastQuestion, setLastQuestion] = useState<HostQuestionView | null>(null);
-  const [result, setResult] = useState<HostQuestionResult | null>(null);
-  const [count, setCount] = useState(0);
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const joinedRef = useRef(false);
-
-  const questions = useRef<QuestionViewDto[]>([]);
 
   const loadGame = useCallback(async () => {
     try {
@@ -46,9 +38,7 @@ export default function HostLivePage() {
       const q = await api<{ quiz: QuizDetailDto }>(`/api/quizzes/${g.game.quizId}`);
       setQuiz(q.quiz);
       if (q.quiz.questions.length === 0) {
-        setBanner("This quiz has no questions yet. Add questions before hosting.");
-      } else {
-        questions.current = q.quiz.questions;
+        setBanner("This quiz has no questions yet. Add questions before hosting a paper.");
       }
     } catch (err) {
       setBanner(err instanceof ApiError ? err.message : "Could not load game");
@@ -62,7 +52,7 @@ export default function HostLivePage() {
   const joinedRefSet = useCallback(() => {
     if (joinedRef.current) return;
     joinedRef.current = true;
-    getSocket().emit("host:join-game", { gameId });
+    getSocket().emit("host:join-game", { gameId, runId: crypto.randomUUID() });
   }, [gameId]);
 
   useEffect(() => {
@@ -71,40 +61,48 @@ export default function HostLivePage() {
     const onConnect = () => joinedRefSet();
     const onHostState = (payload: HostGameStateView) => {
       setState(payload);
-      setResult(payload.questionResult);
-      setCount(payload.currentQuestion?.answerCount ?? 0);
-      if (payload.currentQuestion) setLastQuestion(payload.currentQuestion);
+      setBanner(null);
+    };
+    const onPaperStarted = (payload: { deadline: number }) => {
+      setState((prev) =>
+        prev
+          ? { ...prev, phase: "ACTIVE", deadline: payload.deadline }
+          : prev,
+      );
+      setBanner(null);
     };
     const onPlayerUpdated = (p: PlayerLobbyEntry) => {
       setState((prev) =>
         prev ? { ...prev, players: mergePlayers(prev.players, [p]) } : prev,
       );
     };
-    const onQuestionStarted = (payload: HostQuestionView) => {
-      setLastQuestion(payload);
-      setCount(0);
-      setState((prev) => (prev ? { ...prev, currentQuestion: payload, questionResult: null, phase: "QUESTION_ACTIVE" } : prev));
-    };
-    const onAnswerCount = (payload: { questionId: string; answerCount: number }) => setCount(payload.answerCount);
-    const onQuestionResult = (payload: HostQuestionResult) => {
-      setResult(payload);
-      setState((prev) =>
-        prev ? { ...prev, currentQuestion: null, questionResult: payload, phase: "QUESTION_RESULTS" } : prev,
-      );
+    const onPlayerSubmitted = (p: { playerId: string; submittedCount: number }) => {
+      setState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          submittedCount: p.submittedCount,
+          players: prev.players.map((player) =>
+            player.playerId === p.playerId ? { ...player, submitted: true } : player,
+          ),
+        };
+      });
     };
     const onGameFinished = (payload: { leaderboard: HostGameStateView["leaderboard"] }) => {
       setState((prev) =>
-        prev ? { ...prev, phase: "FINISHED", currentQuestion: null, questionResult: null, leaderboard: payload.leaderboard } : prev,
+        prev
+          ? { ...prev, phase: "FINISHED", deadline: null, leaderboard: payload.leaderboard }
+          : prev,
       );
+      setBanner(null);
     };
     const onError = (payload: { code: string; message: string }) => setBanner(payload.message);
 
     socket.on("connect", onConnect);
     socket.on("host:state", onHostState);
+    socket.on("host:paper-started", onPaperStarted);
     socket.on("host:player-updated", onPlayerUpdated);
-    socket.on("host:question-started", onQuestionStarted);
-    socket.on("host:answer-count", onAnswerCount);
-    socket.on("host:question-result", onQuestionResult);
+    socket.on("host:player-submitted", onPlayerSubmitted);
     socket.on("host:game-finished", onGameFinished);
     socket.on("error", onError);
     if (socket.connected) joinedRefSet();
@@ -112,20 +110,19 @@ export default function HostLivePage() {
     return () => {
       socket.off("connect", onConnect);
       socket.off("host:state", onHostState);
+      socket.off("host:paper-started", onPaperStarted);
       socket.off("host:player-updated", onPlayerUpdated);
-      socket.off("host:question-started", onQuestionStarted);
-      socket.off("host:answer-count", onAnswerCount);
-      socket.off("host:question-result", onQuestionResult);
+      socket.off("host:player-submitted", onPlayerSubmitted);
       socket.off("host:game-finished", onGameFinished);
       socket.off("error", onError);
     };
   }, [gameId, joinedRefSet]);
 
   const send = useCallback((cmd: HostCommand) => {
-      setBusy(true);
-      getSocket().emit(cmd.event, cmd.payload);
-      setTimeout(() => setBusy(false), 600);
-    }, []);
+    setBusy(true);
+    getSocket().emit(cmd.event, cmd.payload);
+    setTimeout(() => setBusy(false), 600);
+  }, []);
 
   if (!game || !quiz || !state) {
     return (
@@ -139,6 +136,7 @@ export default function HostLivePage() {
   }
 
   const phase = state.phase;
+  const minutes = Math.round(state.timeLimitSeconds / 60);
 
   return (
     <RequireAuth>
@@ -160,35 +158,45 @@ export default function HostLivePage() {
 
         <div className="mt-6">
           {phase === "LOBBY" && renderLobby()}
-          {phase === "QUESTION_ACTIVE" && renderActive()}
-          {phase === "QUESTION_RESULTS" && renderResults()}
+          {phase === "ACTIVE" && renderActive()}
           {phase === "FINISHED" && renderFinished()}
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-zinc-800/70 bg-zinc-900/30 p-4 text-sm text-zinc-500">
+          <p>
+            CBT-style paper · {quiz!.questions.length} question{quiz!.questions.length === 1 ? "" : "s"} ·{" "}
+            {minutes} minute{minutes === 1 ? "" : "s"} total. Participants work independently; when time runs
+            out, every outstanding paper is submitted automatically.
+          </p>
         </div>
       </HostChrome>
     </RequireAuth>
   );
 
   function renderLobby() {
-    const first = questions.current[0];
     return (
       <div className="flex flex-col gap-6">
         <Card>
           <p className="text-sm text-zinc-400">
-            {state!.players.length} player{state!.players.length === 1 ? "" : "s"} joined so far. Share the code above, then
-            start when everyone's in.
+            {state!.players.length} player{state!.players.length === 1 ? "" : "s"} joined so far. Share the code,
+            then start the paper when everyone's in.
           </p>
-          {questions.current.length > 0 && (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <Stat label="Questions" value={String(quiz!.questions.length)} />
+            <Stat label="Time limit" value={`${minutes} min`} />
+          </div>
+          {quiz!.questions.length > 0 && (
             <Button
               onClick={() =>
                 send({
-                  event: "host:start-question",
-                  payload: { gameId, questionId: first!.id, runId: crypto.randomUUID() },
+                  event: "host:start-paper",
+                  payload: { gameId, runId: crypto.randomUUID() },
                 })
               }
               disabled={busy}
               className="mt-4 w-full py-3 text-base"
             >
-              Start quiz ({questions.current.length} question{questions.current.length === 1 ? "" : "s"})
+              Start paper ({minutes} min for {quiz!.questions.length} question{quiz!.questions.length === 1 ? "" : "s"})
             </Button>
           )}
         </Card>
@@ -198,71 +206,44 @@ export default function HostLivePage() {
   }
 
   function renderActive() {
-    const lq = lastQuestion;
-    if (!lq) return <p className="text-zinc-400">Question starting…</p>;
+    const deadline = state!.deadline;
+    const total = Math.max(1, state!.players.length);
     return (
       <div className="flex flex-col gap-6">
         <Card>
           <div className="flex items-baseline justify-between">
-            <p className="text-sm font-semibold text-zinc-400">
-              Question {lq.questionNumber} of {lq.totalQuestions}
+            <p className="text-sm font-semibold text-zinc-400">Paper in progress</p>
+            <p className="font-mono text-lg text-zinc-200">
+              {state!.submittedCount}/{total} submitted
             </p>
-            <p className="font-mono text-lg text-zinc-200">{count} answer{count === 1 ? "" : "s"}</p>
           </div>
-          <h2 className="mt-2 text-2xl font-black leading-snug text-zinc-50">{lq.text}</h2>
           <div className="mt-4">
-            <Bar count={count} endsAt={lq.questionEndsAt} />
+            {deadline ? (
+              <Countdown deadline={deadline} durationSeconds={state!.timeLimitSeconds} />
+            ) : (
+              <p className="text-sm text-zinc-500">Starting…</p>
+            )}
           </div>
-          <Button onClick={() => send({ event: "host:end-question", payload: { gameId, runId: crypto.randomUUID() } })} disabled={busy} className="mt-5 w-full">
-            End question now
+          <Button
+            onClick={() =>
+              send({ event: "host:end-paper", payload: { gameId, runId: crypto.randomUUID() } })
+            }
+            disabled={busy}
+            variant="ghost"
+            className="mt-5 w-full"
+          >
+            End paper now (auto-submits everyone)
           </Button>
-        </Card>
-        <PlayerGrid players={state!.players} />
-      </div>
-    );
-  }
-
-  function renderResults() {
-    const res = result;
-    if (!res) return <p className="text-zinc-400">Gathering results…</p>;
-    const last = lastQuestion;
-    const endedIndex = Math.max(0, (last?.questionNumber ?? 1) - 1);
-    const ended = questions.current[endedIndex];
-    const total = last?.totalQuestions ?? questions.current.length;
-    return (
-      <div className="flex flex-col gap-6">
-        <Card>
-          <p className="text-sm font-semibold text-zinc-400">
-            Results · Question {last?.questionNumber ?? endedIndex + 1} of {total} · {res.answerCount} answer
-            {res.answerCount === 1 ? "" : "s"}
-          </p>
-          {last && <h2 className="mt-1 text-xl font-black text-zinc-50">{last.text}</h2>}
-          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {res.optionCounts.map((c) => (
-              <OptionCountRow
-                key={c.optionId}
-                count={c.count}
-                correct={c.optionId === res.correctOptionId}
-                text={optionText(ended, c.optionId) ?? "Unknown"}
-                total={Math.max(1, res.answerCount)}
-              />
-            ))}
-          </div>
-          <div className="mt-5 flex gap-3">
-            <Button onClick={() => send({ event: "host:next-question", payload: { gameId, runId: crypto.randomUUID() } })} disabled={busy} className="flex-1">
-              Next question
-            </Button>
-            <Button variant="ghost" onClick={() => send({ event: "host:end-game", payload: { gameId, runId: crypto.randomUUID() } })} disabled={busy}>
-              End game
-            </Button>
-          </div>
         </Card>
         {state!.leaderboard.length > 0 && (
           <Card>
-            <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-400">Leaderboard</h3>
+            <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-400">
+              Live results (submitted)
+            </h3>
             <Leaderboard rows={state!.leaderboard} highlightId="" />
           </Card>
         )}
+        <PlayerGrid players={state!.players} showSubmitted />
       </div>
     );
   }
@@ -270,8 +251,10 @@ export default function HostLivePage() {
   function renderFinished() {
     return (
       <Card>
-        <h2 className="text-center text-2xl font-black text-emerald-400">Game over!</h2>
-        <p className="mt-1 text-center text-sm text-zinc-500">{state!.leaderboard.length} player{state!.leaderboard.length === 1 ? "" : "s"} · final scores</p>
+        <h2 className="text-center text-2xl font-black text-emerald-400">Paper finished!</h2>
+        <p className="mt-1 text-center text-sm text-zinc-500">
+          {state!.players.length} player{state!.players.length === 1 ? "" : "s"} · final scores
+        </p>
         <div className="mt-5">
           <Leaderboard rows={state!.leaderboard} highlightId="" />
         </div>
@@ -280,10 +263,6 @@ export default function HostLivePage() {
         </div>
       </Card>
     );
-  }
-
-  function optionText(q: QuestionViewDto | undefined, optionId: string): string | null {
-    return q?.options.find((o) => o.id === optionId)?.text ?? null;
   }
 }
 
@@ -295,7 +274,16 @@ function mergePlayers(existing: PlayerLobbyEntry[], updated: PlayerLobbyEntry[])
   return Array.from(map.values());
 }
 
-function PlayerGrid({ players }: { players: PlayerLobbyEntry[] }) {
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+      <p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mt-0.5 text-lg font-bold text-zinc-100">{value}</p>
+    </div>
+  );
+}
+
+function PlayerGrid({ players, showSubmitted = false }: { players: PlayerLobbyEntry[]; showSubmitted?: boolean }) {
   return (
     <div>
       <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-400">
@@ -309,11 +297,22 @@ function PlayerGrid({ players }: { players: PlayerLobbyEntry[] }) {
             <span
               key={p.playerId}
               className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold ${
-                p.connected ? "border-emerald-800/60 bg-emerald-950/30 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-500"
+                !p.connected
+                  ? "border-zinc-700 bg-zinc-900 text-zinc-500"
+                  : p.submitted
+                    ? "border-emerald-800/60 bg-emerald-950/30 text-emerald-200"
+                    : "border-violet-800/60 bg-violet-950/30 text-violet-200"
               }`}
             >
-              <span className={`h-2 w-2 rounded-full ${p.connected ? "bg-emerald-400" : "bg-zinc-600"}`} />
+              <span
+                className={`h-2 w-2 rounded-full ${p.connected ? "bg-current" : "bg-zinc-600"}`}
+              />
               {p.nickname}
+              {showSubmitted && p.submitted ? (
+                <span className="ml-1 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                  done
+                </span>
+              ) : null}
             </span>
           ))}
         </div>
@@ -322,41 +321,27 @@ function PlayerGrid({ players }: { players: PlayerLobbyEntry[] }) {
   );
 }
 
-function Bar({ count, endsAt }: { count: number; endsAt: number }) {
+function Countdown({ deadline, durationSeconds }: { deadline: number; durationSeconds: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
   }, []);
-  const total = Math.max(1, endsAt - (endsAt - 10_000));
-  const remain = Math.max(0, endsAt - now);
-  const pct = Math.min(100, (remain / total) * 100);
+  const remain = Math.max(0, deadline - now);
+  const pct = Math.min(100, (remain / (durationSeconds * 1000)) * 100);
+  const mm = Math.floor(remain / 60_000);
+  const ss = Math.floor((remain % 60_000) / 1000);
   return (
     <div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-        <div className="h-full rounded-full bg-violet-500 transition-all duration-250" style={{ width: `${pct}%` }} />
+        <div
+          className="h-full rounded-full bg-violet-500 transition-all duration-250"
+          style={{ width: `${pct}%` }}
+        />
       </div>
-      <p className="mt-1 text-right font-mono text-sm text-zinc-400">{Math.ceil(remain / 1000)}s</p>
-      <p className="sr-only">{count} answers in</p>
-    </div>
-  );
-}
-
-function OptionCountRow({ count, text, correct, total }: { count: number; text: string; correct: boolean; total: number }) {
-  const pct = Math.round((count / total) * 100);
-  return (
-    <div
-      className={`flex items-center justify-between rounded-xl border px-4 py-2.5 ${
-        correct ? "border-emerald-700/70 bg-emerald-950/40" : "border-zinc-800 bg-zinc-900/60"
-      }`}
-    >
-      <span className={`text-sm font-semibold ${correct ? "text-emerald-300" : "text-zinc-200"}`}>
-        {correct ? "✓ " : "· "}
-        {text}
-      </span>
-      <span className={`font-mono text-sm ${correct ? "text-emerald-300" : "text-zinc-400"}`}>
-        {count} ({pct}%)
-      </span>
+      <p className={`mt-1 text-right font-mono text-lg ${remain < 60_000 ? "text-red-300" : "text-zinc-300"}`}>
+        {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
+      </p>
     </div>
   );
 }

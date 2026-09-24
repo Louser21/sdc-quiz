@@ -1,8 +1,9 @@
 import type { GamePhase, GameSessionStatus, LeaderboardEntry } from "@quiz/shared";
+import { GAME_TRANSITIONS } from "@quiz/shared";
 import { redis } from "../redis/client.js";
 import { AppError, errors } from "../errors/index.js";
 import { logGame } from "../logging/logger.js";
-import { bumpScore, getLeaderboard, removePlayer, setScore } from "../leaderboard/index.js";
+import { getLeaderboard, setScore } from "../leaderboard/index.js";
 
 // ---------------------------------------------------------------------------
 // Key layout
@@ -11,7 +12,7 @@ import { bumpScore, getLeaderboard, removePlayer, setScore } from "../leaderboar
 const stateKey = (id: string) => `game:${id}`;
 const playersKey = (id: string) => `game:${id}:players`;
 const answersKey = (id: string) => `game:${id}:answers`;
-const countsKey = (id: string) => `game:${id}:counts`;
+const markedKey = (id: string) => `game:${id}:marked`;
 const questionsKey = (id: string) => `game:${id}:questions`;
 
 const GAME_KEEPALIVE_SECONDS = 24 * 60 * 60;
@@ -20,6 +21,8 @@ export interface PlayerRecord {
   nickname: string;
   score: number;
   connected: boolean;
+  submitted: boolean;
+  submittedAt: number | null;
   joinedAt: number;
 }
 
@@ -31,7 +34,6 @@ export interface QuestionSnapshotOption {
 export interface QuestionSnapshot {
   id: string;
   text: string;
-  timeLimit: number;
   options: QuestionSnapshotOption[];
 }
 
@@ -48,14 +50,10 @@ export interface GameStateRow {
   hostUserId: string;
   phase: GamePhase | string;
   hostConnected: boolean;
-  currentQuestionId: string | null;
-  questionStartedAt: number | null;
-  questionEndsAt: number | null;
-  questionNumber: number;
-  totalQuestions: number;
-  answerCount: number;
-  resultQuestionId: string | null;
-  correctOptionId: string | null;
+  timeLimitSeconds: number;
+  paperStartedAt: number | null;
+  deadline: number | null;
+  submittedCount: number;
 }
 
 export const PHASE_DEFAULT = "LOBBY";
@@ -65,85 +63,134 @@ export const PHASE_DEFAULT = "LOBBY";
 // ---------------------------------------------------------------------------
 
 const LUA = {
-  startQuestion: `
+  startPaper: `
 local state = KEYS[1]
 local phase = redis.call("HGET", state, "phase")
-if phase ~= "LOBBY" and phase ~= "QUESTION_RESULTS" then
+if phase ~= "LOBBY" then
   return redis.error_reply("INVALID_TRANSITION")
 end
 redis.call("HSET", state,
-  "phase", "QUESTION_ACTIVE",
-  "currentQuestionId", ARGV[1],
-  "questionStartedAt", ARGV[2],
-  "questionEndsAt", ARGV[3],
-  "questionNumber", ARGV[4],
-  "totalQuestions", ARGV[5],
-  "answerCount", 0,
-  "resultQuestionId", "",
-  "correctOptionId", "")
+  "phase", "ACTIVE",
+  "paperStartedAt", ARGV[1],
+  "deadline", ARGV[2])
 return redis.call("HGETALL", state)`,
-  submitAnswer: `
+  setAnswer: `
 local state = KEYS[1]
 local answers = KEYS[2]
-local counts = KEYS[3]
+local players = KEYS[3]
 local phase = redis.call("HGET", state, "phase")
-local current = redis.call("HGET", state, "currentQuestionId")
-local endsAt = redis.call("HGET", state, "questionEndsAt")
-if phase ~= "QUESTION_ACTIVE" or current ~= ARGV[2] then
-  return redis.error_reply("QUESTION_NOT_ACTIVE")
+if phase ~= "ACTIVE" then
+  return redis.error_reply("PAPER_NOT_ACTIVE")
 end
-if tonumber(ARGV[4]) > tonumber(endsAt) then
-  return redis.error_reply("ANSWER_TOO_LATE")
+local deadline = tonumber(redis.call("HGET", state, "deadline"))
+if tonumber(ARGV[4]) >= deadline then
+  return redis.error_reply("PAPER_ENDED")
 end
-local key = ARGV[1] .. ":" .. ARGV[2]
-if redis.call("HEXISTS", answers, key) == 1 then
-  return redis.error_reply("ALREADY_ANSWERED")
+local rec = redis.call("HGET", players, ARGV[2])
+if not rec then
+  return redis.error_reply("PLAYER_NOT_FOUND")
 end
-redis.call("HSET", answers, key, ARGV[3] .. "," .. ARGV[4] .. "," .. ARGV[5])
-redis.call("HINCRBY", counts, ARGV[2] .. ":" .. ARGV[3], 1)
-redis.call("HINCRBY", state, "answerCount", 1)
-return { redis.call("HGET", state, "answerCount") }`,
-  endQuestion: `
+local obj = cjson.decode(rec)
+if obj.submitted then
+  return redis.error_reply("PLAYER_ALREADY_SUBMITTED")
+end
+redis.call("HSET", answers, ARGV[2] .. ":" .. ARGV[3], ARGV[1])
+return { "OK" }`,
+  markReview: `
 local state = KEYS[1]
-local counts = KEYS[2]
+local marked = KEYS[2]
+local players = KEYS[3]
 local phase = redis.call("HGET", state, "phase")
-if phase ~= "QUESTION_ACTIVE" then
-  return redis.error_reply("QUESTION_NOT_ACTIVE")
+if phase ~= "ACTIVE" then
+  return redis.error_reply("PAPER_NOT_ACTIVE")
 end
-local qid = redis.call("HGET", state, "currentQuestionId")
-redis.call("HSET", state,
-  "phase", "QUESTION_RESULTS",
-  "resultQuestionId", qid,
-  "correctOptionId", ARGV[1])
-local answerCount = redis.call("HGET", state, "answerCount")
-local flat = redis.call("HGETALL", counts)
-local result = {}
-local n = 1
+local deadline = tonumber(redis.call("HGET", state, "deadline"))
+if tonumber(ARGV[4]) >= deadline then
+  return redis.error_reply("PAPER_ENDED")
+end
+local rec = redis.call("HGET", players, ARGV[2])
+if not rec then
+  return redis.error_reply("PLAYER_NOT_FOUND")
+end
+local obj = cjson.decode(rec)
+if obj.submitted then
+  return redis.error_reply("PLAYER_ALREADY_SUBMITTED")
+end
+local field = ARGV[2] .. ":" .. ARGV[3]
+if ARGV[1] == "1" then
+  redis.call("HSET", marked, field, "1")
+else
+  redis.call("HDEL", marked, field)
+end
+return { "OK" }`,
+  submitPaper: `
+local state = KEYS[1]
+local players = KEYS[2]
+local phase = redis.call("HGET", state, "phase")
+if phase ~= "ACTIVE" then
+  return redis.error_reply("PAPER_NOT_ACTIVE")
+end
+local deadline = tonumber(redis.call("HGET", state, "deadline"))
+if tonumber(ARGV[2]) >= deadline then
+  return redis.error_reply("PAPER_ENDED")
+end
+local rec = redis.call("HGET", players, ARGV[1])
+if not rec then
+  return redis.error_reply("PLAYER_NOT_FOUND")
+end
+local obj = cjson.decode(rec)
+if obj.submitted then
+  return { "ALREADY_SUBMITTED" }
+end
+obj.submitted = true
+obj.submittedAt = tonumber(ARGV[2])
+redis.call("HSET", players, ARGV[1], cjson.encode(obj))
+redis.call("HINCRBY", state, "submittedCount", 1)
+return { "OK" }`,
+  autoSubmitRemaining: `
+local state = KEYS[1]
+local players = KEYS[2]
+local now = tonumber(ARGV[1])
+local count = 0
+local flat = redis.call("HGETALL", players)
 for i = 1, #flat, 2 do
-  local field = flat[i]
-  local sep = string.find(field, ":")
-  if sep and string.sub(field, 1, sep - 1) == qid then
-    result[n] = { optionId = string.sub(field, sep + 1), count = flat[i + 1] }
-    n = n + 1
+  local pid = flat[i]
+  local rec = redis.call("HGET", players, pid)
+  if rec then
+    local obj = cjson.decode(rec)
+    if not obj.submitted then
+      obj.submitted = true
+      obj.submittedAt = now
+      redis.call("HSET", players, pid, cjson.encode(obj))
+      count = count + 1
+    end
   end
 end
-return { qid, ARGV[1], tostring(answerCount or 0), cjson.encode(result) }`,
+if count > 0 then
+  redis.call("HSET", state, "submittedCount", count)
+end
+return { tostring(count) }`,
   finishGame: `
 local state = KEYS[1]
+local players = KEYS[2]
 local phase = redis.call("HGET", state, "phase")
 if phase == "FINISHED" then
-  return redis.error_reply("GAME_FINISHED")
+  return { "FINISHED" }
+end
+if phase ~= "ACTIVE" and phase ~= "LOBBY" then
+  return redis.error_reply("INVALID_TRANSITION")
 end
 redis.call("HSET", state, "phase", "FINISHED")
-local players = KEYS[2]
 local playersCount = redis.call("HLEN", players)
 return { "FINISHED", tostring(playersCount or 0) }`,
 };
 
 interface LuaCmd {
-  startQuestion: (...args: (string | number)[]) => Promise<string[]>;
-  submitAnswer: (...args: (string | number)[]) => Promise<string[]>;
-  endQuestion: (...args: (string | number)[]) => Promise<string[]>;
+  startPaper: (...args: (string | number)[]) => Promise<string[]>;
+  setAnswer: (...args: (string | number)[]) => Promise<string[]>;
+  markReview: (...args: (string | number)[]) => Promise<string[]>;
+  submitPaper: (...args: (string | number)[]) => Promise<string[]>;
+  autoSubmitRemaining: (...args: (string | number)[]) => Promise<string[]>;
   finishGame: (...args: (string | number)[]) => Promise<string[]>;
 }
 
@@ -162,9 +209,11 @@ ensureScripts();
 
 function luaKeys(name: string): number {
   switch (name) {
-    case "submitAnswer":
+    case "setAnswer":
+    case "markReview":
       return 3;
-    case "endQuestion":
+    case "submitPaper":
+    case "autoSubmitRemaining":
     case "finishGame":
       return 2;
     default:
@@ -175,10 +224,10 @@ function luaKeys(name: string): number {
 function parseLuaReplyError(err: unknown): AppError {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("INVALID_TRANSITION")) return errors.invalidTransition();
-  if (message.includes("QUESTION_NOT_ACTIVE")) return errors.questionNotActive();
-  if (message.includes("ANSWER_TOO_LATE")) return errors.answerTooLate();
-  if (message.includes("ALREADY_ANSWERED")) return errors.alreadyAnswered();
-  if (message.includes("GAME_FINISHED")) return errors.gameFinished();
+  if (message.includes("PAPER_NOT_ACTIVE")) return errors.paperNotActive();
+  if (message.includes("PAPER_ENDED")) return errors.paperEnded();
+  if (message.includes("PLAYER_ALREADY_SUBMITTED")) return errors.alreadySubmitted();
+  if (message.includes("PLAYER_NOT_FOUND")) return errors.invalidSession("Player session no longer valid for this game");
   if (err instanceof Error) {
     return new AppError("INTERNAL_ERROR", message, 500, true);
   }
@@ -204,14 +253,10 @@ function parseState(row: Record<string, string>): GameStateRow {
     hostUserId: row.hostUserId ?? "",
     phase: row.phase ?? PHASE_DEFAULT,
     hostConnected: row.hostConnected === "1",
-    currentQuestionId: row.currentQuestionId || null,
-    questionStartedAt: row.questionStartedAt ? Number(row.questionStartedAt) : null,
-    questionEndsAt: row.questionEndsAt ? Number(row.questionEndsAt) : null,
-    questionNumber: Number(row.questionNumber ?? 0),
-    totalQuestions: Number(row.totalQuestions ?? 0),
-    answerCount: Number(row.answerCount ?? 0),
-    resultQuestionId: row.resultQuestionId || null,
-    correctOptionId: row.correctOptionId || null,
+    timeLimitSeconds: Number(row.timeLimitSeconds ?? 0),
+    paperStartedAt: row.paperStartedAt ? Number(row.paperStartedAt) : null,
+    deadline: row.deadline ? Number(row.deadline) : null,
+    submittedCount: Number(row.submittedCount ?? 0),
   };
 }
 
@@ -226,12 +271,13 @@ export async function createGame(
     quizId: string;
     quizTitle: string;
     hostUserId: string;
+    timeLimitSeconds: number;
   },
   questions: QuestionsSnapshot,
 ): Promise<void> {
   ensureScripts();
   const pipe = redis.multi();
-  pipe.del(playersKey(meta.gameId), answersKey(meta.gameId), countsKey(meta.gameId));
+  pipe.del(playersKey(meta.gameId), answersKey(meta.gameId), markedKey(meta.gameId));
   pipe.hset(stateKey(meta.gameId), {
     gameId: meta.gameId,
     joinCode: meta.joinCode,
@@ -240,14 +286,10 @@ export async function createGame(
     hostUserId: meta.hostUserId,
     phase: PHASE_DEFAULT,
     hostConnected: "0",
-    currentQuestionId: "",
-    questionStartedAt: "",
-    questionEndsAt: "",
-    questionNumber: "0",
-    totalQuestions: String(questions.list.length),
-    answerCount: "0",
-    resultQuestionId: "",
-    correctOptionId: "",
+    timeLimitSeconds: String(meta.timeLimitSeconds),
+    paperStartedAt: "",
+    deadline: "",
+    submittedCount: "0",
   });
   pipe.set(questionsKey(meta.gameId), JSON.stringify(questions));
   pipe.expire(stateKey(meta.gameId), GAME_KEEPALIVE_SECONDS);
@@ -261,7 +303,7 @@ export async function deleteGame(gameId: string): Promise<void> {
     stateKey(gameId),
     playersKey(gameId),
     answersKey(gameId),
-    countsKey(gameId),
+    markedKey(gameId),
     questionsKey(gameId),
   );
   await redis.del(`leaderboard:${gameId}`);
@@ -283,7 +325,7 @@ export async function listLiveGameIds(): Promise<string[]> {
   const ids: string[] = [];
   for (const key of keys) {
     const parts = key.split(":");
-    // state keys are exactly game:{id}; players/answers/counts/questions have extra segments
+    // state keys are exactly game:{id}; players/answers/marked/questions have extra segments
     if (parts.length === 2 && parts[0] === "game" && parts[1]) {
       ids.push(parts[1]);
     }
@@ -292,92 +334,100 @@ export async function listLiveGameIds(): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase transitions (Phase 3) — atomic in Lua
+// Phase transitions — atomic in Lua (Phase 3)
 // ---------------------------------------------------------------------------
 
-export async function startQuestion(
-  gameId: string,
-  question: QuestionSnapshot,
-  questionNumber: number,
-  totalQuestions: number,
-): Promise<GameStateRow> {
-  const now = Date.now();
-  const endsAt = now + question.timeLimit * 1000;
+export async function startPaper(gameId: string, now: number, deadline: number): Promise<GameStateRow> {
+  ensureScripts();
   try {
-    const flat = (await (redis as unknown as LuaCmd).startQuestion(
+    const flat = (await (redis as unknown as LuaCmd).startPaper(
       stateKey(gameId),
-      question.id,
       now,
-      endsAt,
-      questionNumber,
-      totalQuestions,
+      deadline,
     )) as string[];
     await touchGame(gameId);
-    logGame("QUESTION_STARTED", { gameId, questionId: question.id, endsAt });
+    logGame("PAPER_STARTED", { gameId, deadline });
     return parseState(rowsFromFlat(flat as string[]));
   } catch (err) {
     throw parseLuaReplyError(err);
   }
 }
 
-export async function submitAnswer(
+export async function setAnswer(
   gameId: string,
   playerId: string,
   questionId: string,
   optionId: string,
-  points: number,
-): Promise<{ answerCount: number }> {
-  const now = Date.now();
+  now: number,
+): Promise<void> {
   try {
-    const reply = (await (redis as unknown as LuaCmd).submitAnswer(
+    await (redis as unknown as LuaCmd).setAnswer(
       stateKey(gameId),
       answersKey(gameId),
-      countsKey(gameId),
+      playersKey(gameId),
+      optionId,
       playerId,
       questionId,
-      optionId,
       now,
-      points,
-    )) as string[];
-    return { answerCount: Number(reply[0] ?? 0) };
+    );
   } catch (err) {
     throw parseLuaReplyError(err);
   }
 }
 
-export interface QuestionCount {
-  optionId: string;
-  count: number;
+export async function setMarked(
+  gameId: string,
+  playerId: string,
+  questionId: string,
+  marked: boolean,
+  now: number,
+): Promise<void> {
+  try {
+    await (redis as unknown as LuaCmd).markReview(
+      stateKey(gameId),
+      markedKey(gameId),
+      playersKey(gameId),
+      marked ? "1" : "",
+      playerId,
+      questionId,
+      now,
+    );
+  } catch (err) {
+    throw parseLuaReplyError(err);
+  }
 }
 
-export async function endQuestion(gameId: string): Promise<{
-  questionId: string;
-  correctOptionId: string;
-  answerCount: number;
-  optionCounts: QuestionCount[];
-}> {
+export interface SubmitPaperResult {
+  alreadySubmitted: boolean;
+  submittedAt: number;
+}
+
+export async function submitPaper(gameId: string, playerId: string, now: number): Promise<SubmitPaperResult> {
   try {
-    const questions = await getQuestions(gameId);
-    const current = await getState(gameId);
-    if (!current?.currentQuestionId) throw errors.questionNotActive();
-    const correctOptionId = questions.correct[current.currentQuestionId];
-    if (!correctOptionId) throw errors.internal("Missing correct answer for active question");
-    const reply = (await (redis as unknown as LuaCmd).endQuestion(
+    const reply = (await (redis as unknown as LuaCmd).submitPaper(
       stateKey(gameId),
-      countsKey(gameId),
-      correctOptionId,
+      playersKey(gameId),
+      playerId,
+      now,
     )) as string[];
-    await touchGame(gameId);
-    const questionId = reply[0] ?? "";
-    const answerCount = Number(reply[2] ?? 0);
-    const optionCounts = await getCounts(gameId, questionId);
-    logGame("QUESTION_ENDED", { gameId, questionId, answerCount });
     return {
-      questionId,
-      correctOptionId: reply[1] ?? "",
-      answerCount,
-      optionCounts,
+      alreadySubmitted: (reply[0] ?? "") === "ALREADY_SUBMITTED",
+      submittedAt: now,
     };
+  } catch (err) {
+    throw parseLuaReplyError(err);
+  }
+}
+
+/** Mark every not-yet-submitted player as submitted (deadline / host end). Returns how many were auto-submitted. */
+export async function autoSubmitRemaining(gameId: string, now: number): Promise<number> {
+  try {
+    const reply = (await (redis as unknown as LuaCmd).autoSubmitRemaining(
+      stateKey(gameId),
+      playersKey(gameId),
+      now,
+    )) as string[];
+    return Number(reply[0] ?? 0);
   } catch (err) {
     throw parseLuaReplyError(err);
   }
@@ -396,6 +446,14 @@ export async function finishGame(gameId: string): Promise<{ playerCount: number 
   }
 }
 
+/** Guard before any phase transition: LOBBY -> ACTIVE -> FINISHED only. */
+export function assertTransition(from: GamePhase, to: GamePhase): void {
+  const allowed = GAME_TRANSITIONS[from] ?? [];
+  if (!allowed.includes(to)) {
+    throw errors.invalidTransition(`${from} -> ${to} is not a valid transition`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Players + presence
 // ---------------------------------------------------------------------------
@@ -407,7 +465,7 @@ export async function getPlayers(gameId: string): Promise<Record<string, PlayerR
     try {
       players[playerId] = JSON.parse(json) as PlayerRecord;
     } catch {
-      // Skip corrupt entries; restore repairs from answers if needed.
+      // Skip corrupt entries; restore repairs from PG if needed.
     }
   }
   return players;
@@ -442,23 +500,11 @@ export async function setPlayerConnected(
   if (!record) return;
   record.connected = connected;
   await redis.hset(playersKey(gameId), playerId, JSON.stringify(record));
+  await redis.expire(playersKey(gameId), GAME_KEEPALIVE_SECONDS);
 }
 
 export async function setHostConnected(gameId: string, connected: boolean): Promise<void> {
   await redis.hset(stateKey(gameId), "hostConnected", connected ? "1" : "0");
-}
-
-export async function addPlayerScore(
-  gameId: string,
-  playerId: string,
-  points: number,
-): Promise<number> {
-  const record = await getPlayer(gameId, playerId);
-  if (!record) return 0;
-  record.score += points;
-  await redis.hset(playersKey(gameId), playerId, JSON.stringify(record));
-  await bumpScore(gameId, playerId, points);
-  return record.score;
 }
 
 export async function setPlayerScore(gameId: string, playerId: string, score: number): Promise<void> {
@@ -471,79 +517,41 @@ export async function setPlayerScore(gameId: string, playerId: string, score: nu
 
 export async function removePlayerFromGame(gameId: string, playerId: string): Promise<void> {
   await redis.hdel(playersKey(gameId), playerId);
-  await removePlayer(gameId, playerId);
+  await redis.zrem(`leaderboard:${gameId}`, playerId);
 }
 
 // ---------------------------------------------------------------------------
-// Answers
+// Selections (the paper state) + mark-for-review
 // ---------------------------------------------------------------------------
 
-export interface StoredAnswer {
-  playerId: string;
-  optionId: string;
-  ts: number;
-  points: number;
-}
-
-export async function getAnswersForQuestion(
-  gameId: string,
-  questionId: string,
-): Promise<StoredAnswer[]> {
-  const flat = await redis.hgetall(answersKey(gameId));
-  const prefix = `:${questionId}`;
-  const answers: StoredAnswer[] = [];
-  for (const [field, value] of Object.entries(flat)) {
-    const sep = field.lastIndexOf(prefix);
-    if (sep <= 0) continue;
-    const playerId = field.slice(0, sep);
-    const parts = String(value).split(",");
-    if (parts.length !== 3) continue;
-    answers.push({
-      playerId,
-      optionId: parts[0]!,
-      ts: Number(parts[1]),
-      points: Number(parts[2]),
-    });
-  }
-  return answers;
-}
-
-export async function getCounts(
-  gameId: string,
-  questionId: string,
-): Promise<QuestionCount[]> {
-  const flat = await redis.hgetall(countsKey(gameId));
-  const sep = questionId + ":";
-  const counts: QuestionCount[] = [];
-  for (const [field, value] of Object.entries(flat)) {
-    if (!field.startsWith(sep)) continue;
-    counts.push({ optionId: field.slice(sep.length), count: Number(value) });
-  }
-  return counts;
-}
-
-export async function getPlayerAnswerForQuestion(
+/** Latest selection per question for a player, keyed by questionId. */
+export async function getSelections(
   gameId: string,
   playerId: string,
-  questionId: string,
-): Promise<StoredAnswer | null> {
-  const value = await redis.hget(answersKey(gameId), `${playerId}:${questionId}`);
-  if (!value) return null;
-  const parts = String(value).split(",");
-  if (parts.length !== 3) return null;
-  return { playerId, optionId: parts[0]!, ts: Number(parts[1]), points: Number(parts[2]) };
+): Promise<Record<string, string>> {
+  const flat = await redis.hgetall(answersKey(gameId));
+  const prefix = `${playerId}:`;
+  const selections: Record<string, string> = {};
+  for (const [field, optionId] of Object.entries(flat)) {
+    if (!field.startsWith(prefix)) continue;
+    const questionId = field.slice(prefix.length);
+    if (!questionId) continue;
+    selections[questionId] = optionId;
+  }
+  return selections;
 }
 
-export async function countAnswersForPlayer(
-  gameId: string,
-  playerId: string,
-): Promise<number> {
-  const flat = await redis.hgetall(answersKey(gameId));
-  let count = 0;
-  for (const field of Object.keys(flat)) {
-    if (field.startsWith(`${playerId}:`)) count += 1;
+export async function getMarked(gameId: string, playerId: string): Promise<Record<string, boolean>> {
+  const flat = await redis.hgetall(markedKey(gameId));
+  const prefix = `${playerId}:`;
+  const marked: Record<string, boolean> = {};
+  for (const [field] of Object.entries(flat)) {
+    if (!field.startsWith(prefix)) continue;
+    const questionId = field.slice(prefix.length);
+    if (!questionId) continue;
+    marked[questionId] = true;
   }
-  return count;
+  return marked;
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +578,7 @@ export function toLeaderboardEntries(
   players: Record<string, PlayerRecord>,
 ): LeaderboardEntry[] {
   return Object.entries(players)
+    .filter(([, record]) => record.submitted)
     .map(([playerId, record]) => ({ playerId, nickname: record.nickname, score: record.score }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 50);

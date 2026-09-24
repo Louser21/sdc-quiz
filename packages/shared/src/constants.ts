@@ -23,15 +23,20 @@ export const NICKNAME_SCHEMA = z
 
 export const ID_SCHEMA = z.string().uuid();
 
-export const DEFAULT_TIME_LIMIT_SECONDS = 20;
+/** Default total paper time for new quizzes (CBT-style, seconds). */
+export const DEFAULT_QUIZ_TIME_LIMIT_SECONDS = 600;
+/** Allowed range for a quiz's total paper time (seconds). */
+export const QUIZ_TIME_LIMIT_MIN_SECONDS = 60;
+export const QUIZ_TIME_LIMIT_MAX_SECONDS = 7200;
+export const QUIZ_TIME_LIMIT_SCHEMA = z
+  .number()
+  .int()
+  .min(QUIZ_TIME_LIMIT_MIN_SECONDS)
+  .max(QUIZ_TIME_LIMIT_MAX_SECONDS)
+  .default(DEFAULT_QUIZ_TIME_LIMIT_SECONDS);
 
 /** Fine-grained live phases. Persisted broad status is separate in Postgres. */
-export const GAME_PHASES = [
-  "LOBBY",
-  "QUESTION_ACTIVE",
-  "QUESTION_RESULTS",
-  "FINISHED",
-] as const;
+export const GAME_PHASES = ["LOBBY", "ACTIVE", "FINISHED"] as const;
 
 /** DB-level game session lifecycle. */
 export const GAME_SESSION_STATUSES = [
@@ -43,9 +48,8 @@ export const GAME_SESSION_STATUSES = [
 
 /** Valid state-machine transitions (Phase 3 enforces these in Redis). */
 export const GAME_TRANSITIONS: Record<GamePhase, readonly GamePhase[]> = {
-  LOBBY: ["QUESTION_ACTIVE"],
-  QUESTION_ACTIVE: ["QUESTION_RESULTS", "FINISHED"],
-  QUESTION_RESULTS: ["QUESTION_ACTIVE", "FINISHED"],
+  LOBBY: ["ACTIVE"],
+  ACTIVE: ["FINISHED"],
   FINISHED: [],
 };
 

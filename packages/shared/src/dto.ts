@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { ID_SCHEMA, JOIN_CODE_SCHEMA, NICKNAME_SCHEMA } from "./constants.js";
+import {
+  ID_SCHEMA,
+  JOIN_CODE_SCHEMA,
+  NICKNAME_SCHEMA,
+  QUIZ_TIME_LIMIT_SCHEMA,
+} from "./constants.js";
 import { PlayerGameStateView } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +43,7 @@ export type QuizStatus = (typeof QUIZ_STATUSES)[number];
 export const QuizCreateDto = z.object({
   title: z.string().trim().min(1, "Title is required").max(120),
   description: z.string().trim().max(2000).default(""),
+  timeLimitSeconds: QUIZ_TIME_LIMIT_SCHEMA,
 });
 export type QuizCreateDto = z.infer<typeof QuizCreateDto>;
 
@@ -46,6 +52,7 @@ export const QuizUpdateDto = z
     title: z.string().trim().min(1).max(120).optional(),
     description: z.string().trim().max(2000).optional(),
     status: QuizStatusSchema.optional(),
+    timeLimitSeconds: QUIZ_TIME_LIMIT_SCHEMA.optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "Nothing to update");
 export type QuizUpdateDto = z.infer<typeof QuizUpdateDto>;
@@ -55,6 +62,7 @@ export const QuizSummaryDto = z.object({
   title: z.string(),
   description: z.string(),
   status: QuizStatusSchema,
+  timeLimitSeconds: z.number().int(),
   questionCount: z.number().int().min(0),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -74,7 +82,6 @@ export type OptionUpsertDto = z.infer<typeof OptionUpsertDto>;
 export const QuestionUpsertDto = z
   .object({
     text: z.string().trim().min(1, "Question text is required").max(2000),
-    timeLimit: z.coerce.number().int().min(3).max(600).default(20),
     options: z.array(OptionUpsertDto).min(2, "At least 2 options required").max(8),
   })
   .refine((q) => q.options.filter((o) => o.isCorrect).length === 1, "Exactly one correct option required");
@@ -96,7 +103,6 @@ export const QuestionViewDto = z.object({
   id: ID_SCHEMA,
   text: z.string(),
   position: z.number().int(),
-  timeLimit: z.number().int(),
   options: z.array(OptionViewDto),
 });
 export type QuestionViewDto = z.infer<typeof QuestionViewDto>;
@@ -106,6 +112,7 @@ export const QuizDetailDto = z.object({
   title: z.string(),
   description: z.string(),
   status: QuizStatusSchema,
+  timeLimitSeconds: z.number().int(),
   questions: z.array(QuestionViewDto),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -1,38 +1,23 @@
 import { getConfig } from "../config.js";
 
-export interface QuestionTiming {
-  timeLimit: number;
-  startedAt: number;
-  endsAt: number;
-  /** server clock at the moment the answer was received */
-  now: number;
+/**
+ * Server-authoritative scoring (CBT fixed-points model). The client never
+ * supplies points, and correctness is resolved server-side at submit time.
+ *
+ *   points = correct ? SCORE_BASE : 0
+ *
+ * There is intentionally no speed component — a participant's whole paper is
+ * submitted at once, so fixed value per correct answer is the fair model.
+ */
+export function scoreForCorrectness(correct: boolean): number {
+  return correct ? getConfig().SCORE_BASE : 0;
 }
 
 /**
- * Server-authoritative scoring. The client never supplies points.
- *
- * points = round(BASE * (MIN_FRACTION + (1 - MIN_FRACTION) * remainingFraction))
- *
- * - Correct answers only.
- * - Faster correct answers earn proportionally more within [MIN_FRACTION, 1] of BASE.
- * - Wrong answers always earn 0.
+ * Deadline boundary: options are only accepted while `serverNow < deadline`.
+ * At exactly `deadline` the paper is over and every unsubmitted paper is
+ * auto-submitted — the last instant belongs to the deadline.
  */
-export function calculateScore(timing: QuestionTiming, correct: boolean): number {
-  if (!correct) return 0;
-  const total = timing.endsAt - timing.startedAt;
-  if (total <= 0) return 0;
-  const remaining = Math.max(0, timing.endsAt - timing.now);
-  const fraction = Math.min(1, remaining / total);
-  const config = getConfig();
-  const points =
-    config.SCORE_BASE * (config.SCORE_MIN_FRACTION + (1 - config.SCORE_MIN_FRACTION) * fraction);
-  return Math.round(points);
-}
-
-/**
- * Deadline boundary: an answer is only accepted while `serverNow < questionEndsAt`.
- * At exactly `questionEndsAt` the question is over — the last instant belongs to the deadline.
- */
-export function isAnswerOnTime(serverNow: number, questionEndsAt: number): boolean {
-  return serverNow < questionEndsAt;
+export function isWithinPaperDeadline(serverNow: number, deadline: number): boolean {
+  return serverNow < deadline;
 }
