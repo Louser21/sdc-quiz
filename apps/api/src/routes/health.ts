@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { checkDatabase } from "../db/client.js";
 import { checkRedis } from "../redis/client.js";
+import { renderPrometheusText } from "../observability/metrics.js";
 
 const startedAt = Date.now();
 
@@ -28,5 +29,10 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
     }
     const status = ok ? 200 : 503;
     return reply.status(status).send({ status: ok ? "ready" : "not-ready", checks, now: Date.now() });
+  });
+
+  app.get("/metrics", async (_req, reply) => {
+    const text = await renderPrometheusText();
+    return reply.type("text/plain; version=0.0.4; charset=utf-8").send(text);
   });
 }

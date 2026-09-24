@@ -32,13 +32,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Host recovery works (paper runs on without the host; rejoin restores console)
 - [x] Backend restart recovery tested (boot re-arms deadline timers from Redis)
 - [x] Unauthorized operations rejected (ownership + role separation)
-- [ ] Rate limiting enabled
+- [x] Rate limiting enabled (HTTP per-IP plugin + WS token buckets)
 - [x] Correct answers aren't exposed early (never sent before submit)
 - [x] PostgreSQL persistence works (papers, scores, FINISHED sessions)
 - [x] Redis live state works
 - [ ] Backups configured
 - [x] Health endpoints work
 - [x] Structured logging works
+- [x] `/metrics` endpoint (Prometheus text) works
 - [ ] CI passes
 - [ ] Docker deployment works
 - [ ] Staging deployment works
@@ -105,11 +106,29 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 - [x] Gate: `recovery.test.ts` — reconnect restore, post-submit immutability across reconnects, host
       reconnect restores controls, backend restart; full suite 28 passing.
 
-## Phase 5 — Security, rate limiting, observability
+## Phase 5 — Security, rate limiting, observability (DONE, commit in `git log`)
 
-- [ ] Rate limits: login/join/quiz CRUD (HTTP), socket token bucket, host commands.
-- [ ] Host↔player role separation; ownership checks on every privileged op.
-- [ ] Structured `logGame` domain events; `/metrics` (Prometheus text); `/health` + `/ready`.
+- [x] HTTP rate limiting: `@fastify/rate-limit` global floor (default 600/min per IP) + stricter per-route
+      buckets on `POST /api/auth/login` (30/min) and `/register` (30/min), and `POST /api/play/join`
+      (120/min). `errorResponseBuilder` returns an `AppError("RATE_LIMITED", …, 429)` (the plugin
+      THROWS the builder's return, so it must be an AppError for the shared error handler to emit the
+      standard `{error:{code,message}}` envelope — see `app.ts`).
+- [x] Config knobs in `config.ts` + `.env.example`: `RATE_LIMIT_ENABLED`, `_GLOBAL_MINUTE`, `_LOGIN_MINUTE`,
+      `_REGISTER_MINUTE`, `_JOIN_MINUTE`; `buildApp({ rateLimit: {...} })` overrides for headless tests.
+- [x] Socket token buckets (`sockets/token-bucket.ts`, in-memory, documented per-instance trade-off):
+      player actions (set-answer/mark-review/submit/heartbeat) burst 40 @ 5/s per player; host commands
+      (join/start/end) burst 10 @ 1/s per game. Exceeded events → `error` `RATE_LIMITED` (set-answer also
+      acks `accepted:false` so the optimistic client UI reverts).
+- [x] Audit fixes: `player:heartbeat` and `player:sync` payloads are now actually validated; `host:sync`
+      validates its payload AND is gated by `requireHostOwnedGame` (previously any authed host could sync
+      any room). Empty-object events tolerate arg-less emits (`payload ?? {}`).
+- [x] Observability: `observability/metrics.ts` (zero-dependency Prometheus registry) — counters
+      `quiz_http_requests_total{method,route,status}`, `quiz_ws_events_total{event}`,
+      `quiz_ws_rate_limited_total{event}`, `quiz_ws_connections_total{direction}`, gauges `quiz_live_games`
+      / `quiz_live_players` sampled at scrape; exposed at `GET /api/metrics` (text/plain) via `routes/health.ts`.
+- [x] Tests: `rate-limit.test.ts` — per-route join/login 429s + exact envelope, `/metrics` content, WS
+      flood → RATE_LIMITED + metric reflection. Full suite 32 passing (6 files).
+- [x] Gate: `typecheck` (shared→api→web) + `npm test -w @quiz/api` green.
 
 ## Phase 6 — Docker, CI/CD, deployment, backups, docs
 
@@ -136,6 +155,8 @@ Phases reduced to `LOBBY → ACTIVE → FINISHED`.
 1. After Phase 3 gate (full paper round-trip working). — DONE (25 integration tests green)
 2. After Phase 4 (all recovery tests green). — DONE (28 integration tests green)
 3. After load testing, before final report.
+
+> Phase 5 gate also green: 32 integration tests (adds rate limiting + metrics + WS token buckets).
 
 ## Repo map
 

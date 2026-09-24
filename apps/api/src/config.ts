@@ -31,6 +31,15 @@ const envSchema = z.object({
   DEFAULT_QUIZ_TIME_LIMIT_SECONDS: z.coerce.number().int().min(3).max(7200).default(600),
 
   SCORE_BASE: z.coerce.number().int().min(0).default(1000),
+
+  RATE_LIMIT_ENABLED: z
+    .enum(["0", "1", "true", "false"])
+    .default("true")
+    .transform((v) => v !== "0" && v !== "false"),
+  RATE_LIMIT_GLOBAL_MINUTE: z.coerce.number().int().min(1).default(600),
+  RATE_LIMIT_LOGIN_MINUTE: z.coerce.number().int().min(1).default(30),
+  RATE_LIMIT_REGISTER_MINUTE: z.coerce.number().int().min(1).default(30),
+  RATE_LIMIT_JOIN_MINUTE: z.coerce.number().int().min(1).default(120),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

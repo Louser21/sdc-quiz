@@ -9,8 +9,10 @@ import { resolvePlayerFromCookieHeader } from "../players/session.js";
 import { resolveUserFromCookieHeader } from "../auth/plugin.js";
 import { AppError, errors } from "../errors/index.js";
 import { getLogger, logGame } from "../logging/logger.js";
+import { countWsEvent, countWsRateLimited } from "../observability/metrics.js";
 import { gameRoom, hostRoom } from "./rooms.js";
 import { emitterToRoom, emitterToSocket } from "./emitter.js";
+import { hostActionBucket, playerActionBucket } from "./token-bucket.js";
 
 /**
  * Game transport layer. All inbound events are runtime-validated, authorized,
@@ -38,7 +40,14 @@ function parseEvent(name: string, payload: unknown): unknown {
   if (!result.success) {
     throw errors.validation(result.error.issues[0]?.message ?? "Invalid payload");
   }
+  countWsEvent(name);
   return result.data;
+}
+
+/** Emit a RATE_LIMITED error; skips the work the event would have triggered. */
+function rateLimited(io: IoServer, socket: Socket, event: string): void {
+  countWsRateLimited(event);
+  emitterToSocket(io)(socket.id)("error", { code: "RATE_LIMITED", message: "Too many events, slow down" });
 }
 
 function sendAppError(io: IoServer, socket: Socket, err: unknown): void {
@@ -222,6 +231,10 @@ export function setupSocketServer(io: IoServer): void {
     socket.on("host:join-game", async (payload: unknown) => {
       try {
         const data = parseEvent("host:join-game", payload) as ClientEventPayload<"host:join-game">;
+        if (!hostActionBucket.take(`join:${data.gameId}`)) {
+          rateLimited(io, socket, "host:join-game");
+          return;
+        }
         await requireHostOwnedGame(socket, data.gameId);
         await socket.join(hostRoom(data.gameId));
         socket.data.gameId = data.gameId;
@@ -238,6 +251,10 @@ export function setupSocketServer(io: IoServer): void {
     socket.on("host:start-paper", async (payload: unknown) => {
       try {
         const data = parseEvent("host:start-paper", payload) as ClientEventPayload<"host:start-paper">;
+        if (!hostActionBucket.take(`start:${data.gameId}`)) {
+          rateLimited(io, socket, "host:start-paper");
+          return;
+        }
         await requireHostOwnedGame(socket, data.gameId);
         const { state } = await hostGame.startPaper(data.gameId, socket.data.hostUserId!);
         schedulePaperTimer(data.gameId, state.deadline!);
@@ -257,6 +274,10 @@ export function setupSocketServer(io: IoServer): void {
     socket.on("host:end-paper", async (payload: unknown) => {
       try {
         const data = parseEvent("host:end-paper", payload) as ClientEventPayload<"host:end-paper">;
+        if (!hostActionBucket.take(`end:${data.gameId}`)) {
+          rateLimited(io, socket, "host:end-paper");
+          return;
+        }
         await requireHostOwnedGame(socket, data.gameId);
         await hostGame.endPaper(data.gameId, socket.data.hostUserId!);
         await finalizePaperFlow(data.gameId);
@@ -265,13 +286,14 @@ export function setupSocketServer(io: IoServer): void {
       }
     });
 
-    socket.on("host:sync", async (_payload: unknown) => {
+    socket.on("host:sync", async (payload: unknown) => {
       try {
-        parseEvent("host:sync", {});
+        parseEvent("host:sync", payload ?? {});
         if (!socket.data.hostUserId || !socket.data.gameId) {
           toSocket(socket.id)("error", { code: "HOST_NOT_IN_GAME", message: "Join a game room first" });
           return;
         }
+        await requireHostOwnedGame(socket, socket.data.gameId);
         const view = await buildHostState(socket.data.gameId);
         toSocket(socket.id)("host:state", view);
       } catch (err) {
@@ -290,6 +312,17 @@ export function setupSocketServer(io: IoServer): void {
           optionId: raw.optionId ?? "",
           accepted: false,
           reason: "Your session is not attached to a game",
+        });
+        return;
+      }
+      if (!playerActionBucket.take(identity.playerId)) {
+        countWsRateLimited("player:set-answer");
+        const raw = payload as { questionId?: string; optionId?: string };
+        toSocket(socket.id)("player:set-answer-ack", {
+          questionId: raw.questionId ?? "",
+          optionId: raw.optionId ?? "",
+          accepted: false,
+          reason: "Too many events, slow down",
         });
         return;
       }
@@ -327,6 +360,10 @@ export function setupSocketServer(io: IoServer): void {
         toSocket(socket.id)("error", { code: "NOT_IN_GAME", message: "Join a game first" });
         return;
       }
+      if (!playerActionBucket.take(identity.playerId)) {
+        rateLimited(io, socket, "player:mark-review");
+        return;
+      }
       try {
         const data = parseEvent("player:mark-review", payload) as ClientEventPayload<"player:mark-review">;
         if (data.gameId !== identity.gameId) throw errors.invalidGameCode("Wrong game");
@@ -340,6 +377,10 @@ export function setupSocketServer(io: IoServer): void {
       const identity = identifyPlayer(socket);
       if (!identity) {
         toSocket(socket.id)("error", { code: "NOT_IN_GAME", message: "Join a game first" });
+        return;
+      }
+      if (!playerActionBucket.take(identity.playerId)) {
+        rateLimited(io, socket, "player:submit-paper");
         return;
       }
       try {
@@ -370,14 +411,14 @@ export function setupSocketServer(io: IoServer): void {
       }
     });
 
-    socket.on("player:sync", async (_payload: unknown) => {
+    socket.on("player:sync", async (payload: unknown) => {
       const identity = identifyPlayer(socket);
       if (!identity) {
         toSocket(socket.id)("error", { code: "NOT_IN_GAME", message: "Join a game first" });
         return;
       }
       try {
-        parseEvent("player:sync", {});
+        parseEvent("player:sync", payload ?? {});
         const view = await buildPlayerState(identity.gameId, identity.playerId);
         toSocket(socket.id)("player:state", view);
       } catch (err) {
@@ -385,9 +426,15 @@ export function setupSocketServer(io: IoServer): void {
       }
     });
 
-    socket.on("player:heartbeat", async (_payload: unknown) => {
+    socket.on("player:heartbeat", async (payload: unknown) => {
       const identity = identifyPlayer(socket);
       if (!identity) return;
+      if (!playerActionBucket.take(identity.playerId)) return;
+      try {
+        parseEvent("player:heartbeat", payload ?? {});
+      } catch {
+        return;
+      }
       const now = Date.now();
       const last = lastHeartbeat.get(identity.playerId) ?? 0;
       if (now - last < 5_000) return;

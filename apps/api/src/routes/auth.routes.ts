@@ -27,8 +27,15 @@ async function issueSession(
   setSessionCookie(reply, token);
 }
 
-export const authRoutes = async (app: FastifyInstance): Promise<void> => {
-  app.post("/auth/register", async (req, reply) => {
+export interface AuthRouteOptions {
+  rateLimit?: { loginMax?: number; registerMax?: number };
+}
+
+export const authRoutes = async (app: FastifyInstance, opts?: AuthRouteOptions): Promise<void> => {
+  const loginMax = opts?.rateLimit?.loginMax ?? 30;
+  const registerMax = opts?.rateLimit?.registerMax ?? 30;
+
+  app.post("/auth/register", { config: { rateLimit: { max: registerMax, timeWindow: "1 minute" } } }, async (req, reply) => {
     const body = parseWith(RegisterDto, req.body);
     const passwordHash = await hashPassword(body.password);
     let user;
@@ -44,7 +51,7 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
     return reply.status(201).send({ user: toUserDto(user) });
   });
 
-  app.post("/auth/login", async (req, reply) => {
+  app.post("/auth/login", { config: { rateLimit: { max: loginMax, timeWindow: "1 minute" } } }, async (req, reply) => {
     const body = parseWith(LoginDto, req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });
     if (!user || !(await verifyPassword(user.passwordHash, body.password))) {

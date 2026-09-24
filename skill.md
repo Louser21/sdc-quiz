@@ -71,7 +71,9 @@ Phase transitions `LOBBY -> ACTIVE -> FINISHED` are enforced in Lua. `GAME_TRANS
 - Dev API: `npm run dev:api` · Dev web: `API_PROXY_TARGET=http://localhost:3001 npm run dev --workspace @quiz/web`
 - Typecheck: `npm run typecheck` (all) — **build `@quiz/shared` first** (`npm run build -w @quiz/shared`),
   otherwise API/web fail against stale dist types
-- Tests: `npm test -w @quiz/api` (real PG+Redis, 3 service files + integration; DB reset per `beforeEach`)
+- Tests: `npm test -w @quiz/api` (real PG+Redis; unit + 6 integration files; DB reset per `beforeEach`).
+  **Stale Redis games survive runs** (`resetDb` only truncates Postgres) — if a run looks polluted, flush the
+  compose Redis first: `redis-cli -p 6380 flushdb`.
 - Lint: `npm run lint` (currently broken repo-wide — stopgap: rely on typecheck only)
 
 ## Code conventions
@@ -81,6 +83,16 @@ Phase transitions `LOBBY -> ACTIVE -> FINISHED` are enforced in Lua. `GAME_TRANS
   `leaderboard/`; DB access isolated in services.
 - Errors: `AppError(code, message, status)` from `src/errors`; `parseWith(schema, value)` for validation;
   `sendError` shape `{ error: { code, message } }` reused for socket errors.
+- Rate limiting: `@fastify/rate-limit` (HTTP, per-IP, in-memory). **Gotcha:** the plugin THROWS whatever
+  `errorResponseBuilder` returns — it must be an `AppError` (use `errors.rateLimited()`), never a plain
+  object, or every 429 becomes a 500. Per-route buckets via `{ config: { rateLimit: { max, timeWindow } } }`.
+  Socket layer uses `TokenBucket` (in-memory, `sockets/token-bucket.ts`): player actions burst 40 @ 5/s,
+  host commands burst 10 @ 1/s; exceeded → `error` `RATE_LIMITED` (set-answer acks `accepted:false` too).
+- Observability: `observability/metrics.ts` zero-dep Prometheus registry; `GET /api/metrics` renders
+  `quiz_http_requests_total`, `quiz_ws_events_total`, `quiz_ws_rate_limited_total`,
+  `quiz_ws_connections_total` + live gauges. Request counter lives in an `onResponse` hook in `app.ts`.
+- Empty-object WS events (`player:sync`, `player:heartbeat`, `host:sync`) tolerate arg-less emits — handle
+  with `parseEvent(name, payload ?? {})`. `host:sync` is OWNERSHIP-checked via `requireHostOwnedGame`.
 - Scoring: **fixed points** — `scoreForCorrectness(correct) = correct ? SCORE_BASE : 0` (default 1000).
   No speed component; a whole paper is submitted at once.
 - Host commands accept optional `runId` shorthand for idempotency bookkeeping.
