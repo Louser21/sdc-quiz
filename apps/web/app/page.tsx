@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HomeActions } from "../components/chrome";
 
 export default function Home() {
   return (
@@ -12,18 +12,7 @@ export default function Home() {
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row">
-        <Link
-          href="/join"
-          className="rounded-2xl bg-violet-600 px-8 py-4 text-lg font-bold text-white shadow-lg shadow-violet-600/30 hover:bg-violet-500"
-        >
-          Join a game
-        </Link>
-        <Link
-          href="/host/login"
-          className="rounded-2xl border border-zinc-700 bg-zinc-900 px-8 py-4 text-lg font-bold text-zinc-200 hover:border-violet-500 hover:text-white"
-        >
-          Host a quiz
-        </Link>
+        <HomeActions />
       </div>
 
       <p className="text-xs text-zinc-600">Join with a code · answers are checked server-side · reconnect-proof</p>

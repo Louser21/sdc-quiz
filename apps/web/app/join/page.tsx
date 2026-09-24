@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { PlayerJoinResultDto } from "@quiz/shared";
 import { api, ApiError } from "../../lib/api";
 import { Button, Card, ErrorBanner, Field, Input } from "../../components/ui";
+import { GuestNav } from "../../components/chrome";
 import { dropSocket } from "../../lib/socket";
 
 interface LiveSession {
@@ -64,7 +65,9 @@ export default function JoinPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-6">
+    <div className="min-h-screen">
+      <GuestNav />
+      <main className="flex min-h-[80vh] flex-col items-center justify-center gap-6 px-6">
       <div className="text-center">
         <h1 className="text-4xl font-black tracking-tight text-violet-400">Quiz Live</h1>
         <p className="mt-2 text-sm text-zinc-500">Enter the join code your host shares to play along.</p>
@@ -111,7 +114,8 @@ export default function JoinPage() {
           </Button>
         </form>
       </Card>
-    </main>
+      </main>
+    </div>
   );
 }
 

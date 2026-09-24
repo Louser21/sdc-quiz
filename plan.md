@@ -192,6 +192,8 @@ proper email/device binding is deferred to `docs/known-issues.md`:
 - [x] Device stuck to one LIVE game (`ALREADY_IN_GAME`); released on finish.
 - [x] `GET /api/play/me` + `/join` resume banner ("Continue your paper").
 - [x] Finished-page nav: host → dashboard; player → Home.
+- [x] Home/Dashboard reachable on every page (GuestNav on /join+/play; Dashboard in
+      host nav; landing shows "Go to dashboard" for logged-in hosts).
 - [x] `docs/known-issues.md` (identity model, Redis gap, single-instance limits).
 - [x] Tests: nickname freeze, second-live-game guard, /play/me (35 integration / 6 files green).
 

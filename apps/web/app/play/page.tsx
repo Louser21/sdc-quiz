@@ -9,6 +9,7 @@ import {
   type PlayerSetAnswerAckEvent,
 } from "@quiz/shared";
 import { getSocket } from "../../lib/socket";
+import { GuestNav } from "../../components/chrome";
 
 type View =
   | { kind: "connecting" }
@@ -218,9 +219,10 @@ export default function PlayPage() {
 
 function PlayShell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen flex-col items-center gap-6 px-6 py-8">
-      {children}
-    </main>
+    <div className="min-h-screen">
+      <GuestNav />
+      <main className="flex flex-col items-center gap-6 px-6 py-8">{children}</main>
+    </div>
   );
 }
 

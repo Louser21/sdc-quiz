@@ -25,6 +25,9 @@ export function HostNav() {
       <div className="flex items-center gap-3 text-sm text-zinc-300">
         {!loading && user ? (
           <>
+            <Link href="/dashboard" className="rounded-lg border border-zinc-700 px-3 py-1.5 hover:border-violet-500 hover:text-white">
+              Dashboard
+            </Link>
             <Link href="/games" className="rounded-lg border border-zinc-700 px-3 py-1.5 hover:border-violet-500 hover:text-white">
               Sessions
             </Link>
@@ -39,6 +42,53 @@ export function HostNav() {
         ) : null}
       </div>
     </header>
+  );
+}
+
+/** Minimal top bar for player-facing pages (join, play): brand + Home. */
+export function GuestNav() {
+  return (
+    <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+      <Link href="/" className="text-2xl font-black tracking-tight text-violet-400">
+        Quiz Live
+      </Link>
+      <Link
+        href="/"
+        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-white"
+      >
+        Home
+      </Link>
+    </header>
+  );
+}
+
+/** Landing-page actions: logged-in hosts get a dashboard shortcut instead of going through join/host. */
+export function HomeActions() {
+  const { user, loading } = useAuth();
+  return (
+    <>
+      <Link
+        href="/join"
+        className="rounded-2xl bg-violet-600 px-8 py-4 text-lg font-bold text-white shadow-lg shadow-violet-600/30 hover:bg-violet-500"
+      >
+        Join a game
+      </Link>
+      {!loading && user ? (
+        <Link
+          href="/dashboard"
+          className="rounded-2xl border border-zinc-700 bg-zinc-900 px-8 py-4 text-lg font-bold text-zinc-200 hover:border-violet-500 hover:text-white"
+        >
+          Go to dashboard
+        </Link>
+      ) : (
+        <Link
+          href="/host/login"
+          className="rounded-2xl border border-zinc-700 bg-zinc-900 px-8 py-4 text-lg font-bold text-zinc-200 hover:border-violet-500 hover:text-white"
+        >
+          Host a quiz
+        </Link>
+      )}
+    </>
   );
 }
 
