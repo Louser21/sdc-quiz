@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
+/* SDC brand palette — extracted from the SDC logo (black + blue family).
+   The violet-* accent tokens used throughout the UI are remapped to these
+   blues, so the accent ladder, headings, fills and rings all follow the logo. */
+@theme {
+  --color-violet-50: #eef3ff;
+  --color-violet-100: #dde8ff;
+  --color-violet-200: #c8dbfc;
+  --color-violet-300: #b7cdfb;
+  --color-violet-400: #8fa9f6;
+  --color-violet-500: #2a67f5;
+  --color-violet-600: #135cfc;
+  --color-violet-700: #0f4cd0;
+  --color-violet-800: #0c3da8;
+  --color-violet-900: #0a2e85;
+  --color-violet-950: #091759;
+}
+
 :root {
-  --brand: #7c3aed;
-  --brand-dark: #6d28d9;
+  --brand: #135cfc;
+  --brand-dark: #0039ba;
 }
 
 body {

@@ -174,8 +174,8 @@ describe("concurrent submits", () => {
     // Simultaneous last submits → single finish broadcast, both scorecards.
     const score1P = waitForEvent<{ score: number }>(s1, "player:scorecard");
     const out2P = scorecardOrFinish(s2);
-    const finishEvents = new Promise<(Record<string, unknown> | "finished")[]>((resolve) => {
-      const seen: (Record<string, unknown> | "finished")[] = [];
+    const finishEvents = new Promise<(string | Record<string, unknown>)[]>((resolve) => {
+      const seen: (string | Record<string, unknown>)[] = [];
       const onFinish = (payload: unknown) =>
         seen.push(typeof payload === "string" ? payload : (payload as Record<string, unknown>));
       s1.on("game:finished", onFinish);

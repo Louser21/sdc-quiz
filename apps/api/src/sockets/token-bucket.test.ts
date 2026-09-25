@@ -52,8 +52,9 @@ describe("TokenBucket", () => {
     vi.useFakeTimers();
     // maxEntries=3: exhaust a key, let it go idle past the 2-min cutoff, then
     // churn fresh keys so the map grows; a failing take triggers the sweep.
-    const bucket = new TokenBucket(1, 1, 3) as TokenBucket & {
-      buckets: Map<string, { last: number }>;
+    const bucket = new TokenBucket(1, 1, 3) as unknown as {
+      take(k: string): boolean;
+      buckets: Map<string, { tokens: number; last: number }>;
     };
     expect(bucket.take("idle-old")).toBe(true);
     vi.setSystemTime(Date.now() + 121_000);

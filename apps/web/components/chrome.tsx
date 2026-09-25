@@ -19,7 +19,8 @@ export function HostNav() {
 
   return (
     <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-      <Link href="/" className="text-2xl font-black tracking-tight text-violet-400">
+      <Link href="/" className="flex items-center gap-2.5 text-2xl font-black tracking-tight text-violet-400">
+        <img src="/sdc.png" alt="" className="h-8 w-8 rounded-full" />
         Quiz Live
       </Link>
       <div className="flex items-center gap-3 text-sm text-zinc-300">
@@ -49,7 +50,8 @@ export function HostNav() {
 export function GuestNav() {
   return (
     <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-      <Link href="/" className="text-2xl font-black tracking-tight text-violet-400">
+      <Link href="/" className="flex items-center gap-2.5 text-2xl font-black tracking-tight text-violet-400">
+        <img src="/sdc.png" alt="" className="h-8 w-8 rounded-full" />
         Quiz Live
       </Link>
       <Link

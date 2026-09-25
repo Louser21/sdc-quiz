@@ -87,7 +87,6 @@ export default function DashboardPage() {
         <div className="flex items-end justify-between">
         <div className="text-center">
           <h1 className="text-3xl font-black text-violet-400">My quizzes</h1>
-          <p className="mt-1 text-sm text-zinc-500">Create, edit, and publish quizzes for live games.</p>
         </div>
         <Button
           onClick={() => router.push("/quizzes/new")}
