@@ -21,7 +21,7 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      const res = await api<{ user: UserDto }>("/api/auth/login", {
+      await api<{ user: UserDto }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });

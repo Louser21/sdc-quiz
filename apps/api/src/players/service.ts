@@ -84,7 +84,7 @@ export async function joinGame(
 
   let playerId: string;
   let sessionId: string;
-  let rejoined = rejoin;
+  const rejoined = rejoin;
   let nickname = input.nickname;
 
   if (rejoin) {

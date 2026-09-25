@@ -177,7 +177,6 @@ export default function QuizEditorPage() {
   async function moveQuestion(index: number, dir: -1 | 1) {
     const target = index + dir;
     if (target < 0 || target >= questions.length) return;
-    const ids = questions.map((q) => q.id).filter(Boolean);
     const next = [...questions];
     [next[index], next[target]] = [next[target]!, next[index]!];
     if (!next[index]?.id || !next[target]?.id) {

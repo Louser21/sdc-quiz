@@ -27,7 +27,6 @@ export const metrics = {
  * Returns { hostCookie, gameId, joinCode, quizId }.
  */
 export function seedHostAndGame(timeLimitSeconds) {
-  const base = http.request;
   const email = `k6-host-${__ENV.URL_HASH || "smoke"}-${Date.now()}@load.test`;
 
   let res = http.post(`${URL_BASE}/api/auth/register`, JSON.stringify({
@@ -142,7 +141,7 @@ export function connectSocketio(hostCookie, handlers) {
           const [event, payload] = JSON.parse(data.slice(2));
           if (handlers[event]) handlers[event](payload, socket);
           if (present[event]) present[event](payload, socket);
-        } catch (e) {
+        } catch {
           // ignore malformed frames during close
         }
         return;

@@ -6,10 +6,8 @@
 // VU #1 doubles as the host driver: it connects with the seed host cookie,
 // starts the paper shortly into the ramp and keeps it ACTIVE through the peak.
 // Env overrides for bounded runs: PEAK (default 1000 VUs), HOLD (default 120s).
-import http from "k6/http";
 import { check, sleep } from "k6";
 import {
-  URL_BASE,
   seedHostAndGame,
   joinGame,
   connectSocketio,

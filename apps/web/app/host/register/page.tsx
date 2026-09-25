@@ -27,7 +27,7 @@ export default function RegisterPage() {
     }
     setBusy(true);
     try {
-      const res = await api<{ user: UserDto }>("/api/auth/register", {
+      await api<{ user: UserDto }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({ name, email, password }),
       });

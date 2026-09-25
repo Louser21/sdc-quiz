@@ -3,7 +3,6 @@ import { getConfig } from "../config.js";
 import { getLogger } from "../logging/logger.js";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __redis: Redis | undefined;
 }
 

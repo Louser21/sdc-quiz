@@ -1,6 +1,6 @@
 import type { Server as IoServer, Socket } from "socket.io";
 import { z } from "zod";
-import { CLIENT_EVENTS, type ClientEventName, type ClientEventPayload } from "@quiz/shared";
+import { CLIENT_EVENTS, type ClientEventPayload } from "@quiz/shared";
 import * as store from "../game/store.js";
 import { buildHostState, buildPlayerState } from "../game/state.js";
 import * as hostGame from "../game/host.js";

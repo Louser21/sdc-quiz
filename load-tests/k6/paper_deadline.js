@@ -6,7 +6,6 @@
 // Unlike paper_ramp, players here answer lazily and the DEADLINE does the
 // work: finalize + leaderboard are driven by the server's own timer.
 // Env overrides for bounded runs: VUS (default 250), PAPER (seconds, default 30).
-import http from "k6/http";
 import { check, sleep } from "k6";
 import {
   seedHostAndGame,
@@ -89,7 +88,7 @@ export default function (seed) {
       }
     },
 
-    "player:scorecard": (sc, s) => {
+    "player:scorecard": (sc, _s) => {
       check(sc, {
         "scorecard is a bounded, complete result": (p) =>
           p.submitted === true &&

@@ -6,7 +6,6 @@ import {
   joinGame,
   connectSocketio,
   emit,
-  metrics,
 } from "./common.js";
 
 export const options = {
