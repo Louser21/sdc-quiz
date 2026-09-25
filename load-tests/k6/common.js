@@ -79,7 +79,9 @@ export function seedHostAndGame(timeLimitSeconds) {
   return { cookieHeader, gameId: res.json().game.id, joinCode: res.json().game.joinCode };
 }
 
-/** Play-join as a fresh player. Returns { cookieHeader, gameId } or null. */
+/** Play-join as a fresh player. Returns { cookieHeader, gameId } or null.
+ * NOTE: the API caps nicknames at 24 chars, and joinGame appends "-<ts>", so
+ * callers must pass bases of <=10 chars. */
 export function joinGame(code, nickname) {
   const nick = `${nickname}-${Date.now()}`; // unique per run (server enforces per-game uniqueness)
   const res = http.post(`${URL_BASE}/api/play/join`, JSON.stringify({

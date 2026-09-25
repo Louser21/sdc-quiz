@@ -45,8 +45,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Docker deployment works (compose `--profile app` verified: nginx→api→web, sockets, health/ready/metrics)
 - [~] Staging deployment works (compose-stack deployment exercised; staging VM sweeps outstanding)
 - [x] Production deployment documented
-- [~] 100 / 500 / 1,000-user load runs (k6 scripts written, smoke-validated at 8 VU; full-scale run deferred to staging hardware)
-- [~] Reconnect storm tested (E2E refresh recovery green; k6 reconnect-storm script ready for staging)
+- [~] 100 / 500 / 1,000-user load runs (k6 scripts fixed + bounded-validated at
+      100 VU on the compose stack; full-scale run deferred to staging hardware)
+- [~] Reconnect storm tested (E2E refresh recovery green; k6 reconnect-storm run at
+      30 VU locally — 60/60 reconnects, zero failures; full-scale deferred to staging)
 - [x] Simultaneous-submit race tested (Lua atomic lock + PG unique + integration tests)
 - [x] Final result persistence verified
 
@@ -197,6 +199,31 @@ proper email/device binding is deferred to `docs/known-issues.md`:
 - [x] `docs/known-issues.md` (identity model, Redis gap, single-instance limits).
 - [x] Tests: nickname freeze, second-live-game guard, /play/me (35 integration / 6 files green).
 
+## Phase 9 — Scale/CI gap-closure (DONE, commit pending)
+
+Closed every remaining board gap that can be executed before real infra is
+available (VPS + git remote):
+
+- [x] CI workflow validated: `.github/workflows/ci.yml` YAML-parses; every job
+      (typecheck, unit+integration, docker build) is a locally-run-green command.
+- [x] k6 bugfix: all three storm scripts 400'd on **nickname length** — the API
+      caps nicknames at 24 chars but `joinGame()` appends `-<13-digit ts>` and
+      the scenario names were too long. Shortened to `p<N>` / `d<N>` / `r<N>`;
+      documented in `load-tests/k6/common.js`.
+- [x] k6 bugfix: paper_ramp + paper_deadline let each VU re-join on every
+      iteration (spin loop flooded the 120/min join throttle). Per-VU `played`
+      flag now makes each VU join+play exactly once, like a real player.
+- [x] Scenario env overrides for bounded runs: `PEAK`/`HOLD` (ramp),
+      `VUS`/`PAPER` (deadline), `VUS`/`ITER` (reconnect).
+- [x] Bounded validation on the compose stack (single host, below join throttle):
+      reconnect storm 30 VU ×2 (60/60, html p95 211 ms, ws p95 92 ms);
+      deadline storm 40 VU 60 s paper (160/160, http p95 187 ms);
+      ramp peak 100 VU hold 45 s (100/100, http p95 200 ms, ws p95 119 ms).
+      All thresholds green, zero socket rate-limits. Recorded in
+      `docs/load-testing.md`.
+- [ ] Blocked on infra: first GitHub Actions run, staging VM sweeps, 500/1,000-VU
+      runs, reconnect storm at scale, TLS sweep.
+
 ---
 
 ## Milestone check-ins
@@ -204,6 +231,7 @@ proper email/device binding is deferred to `docs/known-issues.md`:
 1. After Phase 3 gate (full paper round-trip working). — DONE (25 integration tests green)
 2. After Phase 4 (all recovery tests green). — DONE (28 integration tests green)
 3. After load testing, before final report. — DONE (k6 smoke + E2E; full-scale deferred to staging)
+4. After Phase 9 (scale/CI gap-closure). — DONE (bounded load green at 100 VU; CI + k6 fixed)
 
 > Phase 5 gate also green: 32 integration tests (adds rate limiting + metrics + WS token buckets).
 > Phase 7 gate also green: E2E 2/2 + k6 smoke on raw Engine.IO framing + 32/6 integration + typecheck.

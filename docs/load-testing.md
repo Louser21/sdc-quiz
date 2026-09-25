@@ -27,6 +27,14 @@ start/keep the paper ACTIVE.
 > target instance for the run (`RATE_LIMIT_ENABLED=false` or
 > `RATE_LIMIT_JOIN_MINUTE=100000`), then restore them.
 
+Bounded local runs (beneath the join throttle) are supported via env overrides —
+defaults match the staging targets:
+
+- `paper_ramp.js`: `PEAK` (default 1000 VUs), `HOLD` (default 120 s)
+- `paper_deadline.js`: `VUS` (default 250), `PAPER` (seconds, default 30 —
+  note the API enforces a 60 s minimum paper)
+- `reconnect_storm.js`: `VUS` (default 100), `ITER` (default 3)
+
 ```sh
 # smoke (small: 8 VUs, validates the whole loop)
 docker run --rm -v "$PWD/load-tests/k6:/k6" --network host grafana/k6 run \
@@ -96,14 +104,23 @@ Also record event count from `GET /api/metrics` for an independent cross-check.
 3. `listLiveGameIds` (used by `/api/metrics` + boot restore) does a Redis SCAN —
    fine for ops, keep it out of hot paths.
 
-## Results so far (local smoke, 2026-09-24, compose stack)
+## Results so far (bounded validation, 2026-09-25, compose stack, single host)
 
-| Metric | Observed |
-|--------|----------|
-| HTTP req failures | 0 / 13 (seed + 8 joins) |
-| `ws_connect_ms` (socket.io connected) | avg 11.4 ms · p95 26.8 ms |
-| ws messages in/out | 44 / 19 across 9 sockets (sync→state→answer→ack→scorecard verified) |
+Nickname fix note: `joinGame()` appends `-<13-digit ts>`, and the API caps
+nicknames at 24 chars — scenario names were shortened to `p<N>`, `d<N>`, `r<N>`
+(fixed 2026-09-25; earlier "run" attempts 400'd on nickname length, not load).
+Each VU plays exactly once (module-level `played` flag) because real players
+don't re-join the same game — the previous spin loop hit the join throttle.
+
+| Scenario | Target | VUs | Checks | Failures | http p95 | ws connect p95 | Result |
+|----------|--------|-----|--------|----------|----------|----------------|--------|
+| reconnect_storm | 2 drop/rejoin cycles | 30 | 60/60 | 0 | 211 ms | 92 ms | pass |
+| paper_deadline | 60 s paper, prompt submits | 40 | 160/160 | 0 | 187 ms | 103 ms | pass |
+| paper_ramp | peak 100, hold 45 s | 100 | 100/100 | 0 | 200 ms | 119 ms | pass |
+
+All thresholds green; answer-ack is effectively instant (Lua
+`player:set-answer` path) at these counts. Zero socket rate-limits.
 
 Full 100–1000 VU runs require staging hardware (local compose box is the
-platform's bottleneck); record them here with the table from "Metrics to record"
-when run.
+platform's bottleneck, and the per-IP join throttle caps any single-host run);
+record them here with the table from "Metrics to record" when run.

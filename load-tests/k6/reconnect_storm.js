@@ -4,6 +4,7 @@
 // path used after a hostile-network drop.
 //
 //   k6 run -e URL=https://staging.example.com load-tests/k6/reconnect_storm.js
+// Env overrides for bounded runs: VUS (default 100), ITER (default 3).
 import { sleep } from "k6";
 import {
   seedHostAndGame,
@@ -13,12 +14,15 @@ import {
   metrics,
 } from "./common.js";
 
+const VUS = Number(__ENV.VUS || 100);
+const ITER = Number(__ENV.ITER || 3);
+
 export const options = {
   scenarios: {
     reconnects: {
       executor: "per-vu-iterations",
-      vus: 100,
-      iterations: 3,
+      vus: VUS,
+      iterations: ITER,
       maxDuration: "3m",
     },
   },
@@ -34,7 +38,7 @@ export function setup() {
 }
 
 export default function (seed) {
-  const nickname = `k6-reconnect-${__VU}`;
+  const nickname = `r${__VU}`; // joinGame appends -<ts>; nicknames capped at 24 chars
   const joined = joinGame(seed.joinCode, nickname);
   if (!joined) return;
 

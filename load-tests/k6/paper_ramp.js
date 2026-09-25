@@ -5,6 +5,7 @@
 //
 // VU #1 doubles as the host driver: it connects with the seed host cookie,
 // starts the paper shortly into the ramp and keeps it ACTIVE through the peak.
+// Env overrides for bounded runs: PEAK (default 1000 VUs), HOLD (default 120s).
 import http from "k6/http";
 import { sleep } from "k6";
 import {
@@ -16,12 +17,15 @@ import {
   metrics,
 } from "./common.js";
 
+const PEAK = Number(__ENV.PEAK || 1000);
+const HOLD = Number(__ENV.HOLD || 120);
+
 export const options = {
   vus: 50,
   stages: [
     { duration: "30s", target: 100 },
-    { duration: "60s", target: 1000 },
-    { duration: "120s", target: 1000 },
+    { duration: "60s", target: PEAK },
+    { duration: `${HOLD}s`, target: PEAK },
     { duration: "30s", target: 0 },
   ],
   thresholds: {
@@ -37,8 +41,14 @@ export function setup() {
   return seed;
 }
 
+// Each k6 VU has its own JS runtime, so this flag is per-VU and makes a VU
+// join+play exactly once (a real player does not re-join the same game).
+let played = false;
+
 export default function (seed) {
-  const nickname = `k6-player-${__VU}`;
+  if (played) return sleep(5);
+  played = true;
+  const nickname = `p${__VU}`; // joinGame appends -<ts>; nicknames capped at 24 chars
   const joined = joinGame(seed.joinCode, nickname);
   if (!joined) return;
 

@@ -5,6 +5,7 @@
 //
 // Unlike paper_ramp, players here answer lazily and the DEADLINE does the
 // work: finalize + leaderboard are driven by the server's own timer.
+// Env overrides for bounded runs: VUS (default 250), PAPER (seconds, default 30).
 import http from "k6/http";
 import { sleep } from "k6";
 import {
@@ -15,13 +16,14 @@ import {
   metrics,
 } from "./common.js";
 
-const PAPER_SECONDS = 30;
+const PAPER_SECONDS = Number(__ENV.PAPER || 30);
+const VUS = Number(__ENV.VUS || 250);
 
 export const options = {
   scenarios: {
     cohort: {
       executor: "constant-vus",
-      vus: 250,
+      vus: VUS,
       duration: `${PAPER_SECONDS + 40}s`,
     },
   },
@@ -38,8 +40,14 @@ export function setup() {
   return seed;
 }
 
+// Each k6 VU has its own JS runtime, so this flag is per-VU and makes a VU
+// join+play exactly once (a real player does not re-join the same game).
+let played = false;
+
 export default function (seed) {
-  const nickname = `k6-deadline-${__VU}`;
+  if (played) return sleep(5);
+  played = true;
+  const nickname = `d${__VU}`; // joinGame appends -<ts>; nicknames capped at 24 chars
   const joined = joinGame(seed.joinCode, nickname);
   if (!joined) return;
 
