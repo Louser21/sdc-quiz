@@ -41,7 +41,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
 - [x] Structured logging works
 - [x] `/metrics` endpoint (Prometheus text) works
 - [~] CI passes (workflow added; every job-equivalent ran green locally — typecheck,
-      integration 32/6, docker `compose build api web`, E2E 2/2 — first GitHub Actions run pending repo push)
+      unit 26 + integration 41 (67 total), docker `compose build api web`, E2E 4/4
+      incl. hostile-network — first GitHub Actions run pending repo push)
 - [x] Docker deployment works (compose `--profile app` verified: nginx→api→web, sockets, health/ready/metrics)
 - [~] Staging deployment works (compose-stack deployment exercised; staging VM sweeps outstanding)
 - [x] Production deployment documented
@@ -49,7 +50,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` not done.
       100 VU on the compose stack; full-scale run deferred to staging hardware)
 - [~] Reconnect storm tested (E2E refresh recovery green; k6 reconnect-storm run at
       30 VU locally — 60/60 reconnects, zero failures; full-scale deferred to staging)
-- [x] Simultaneous-submit race tested (Lua atomic lock + PG unique + integration tests)
+- [x] Simultaneous-submit race tested (Lua atomic lock + PG unique + integration race wall)
+- [x] Duplicate-submit / natural-end / answer-burst / join-burst races tested (integration/concurrency.test.ts, 6 cases)
+- [x] Unit-layer behavior tests (26 unit tests / 5 files: token bucket, scoring, session, config, join-code)
+- [x] Hostile-network recovery tested (E2E CDP offline drop + restore + finish)
 - [x] Final result persistence verified
 
 ---
@@ -224,6 +228,37 @@ available (VPS + git remote):
 - [ ] Blocked on infra: first GitHub Actions run, staging VM sweeps, 500/1,000-VU
       runs, reconnect storm at scale, TLS sweep.
 
+## Phase 9.5 — Test hardening (DONE, commit pending)
+
+Made the whole suite robust ("foolproof for most reasons"), per the owner's ask:
+
+- [x] **Unit layer added** (was a gap: `npm test` previously ran zero unit tests).
+      26 tests / 5 files — `sockets/token-bucket`, `scoring`, `players/session`,
+      `config`, `game/join-code`. Fixed test-time bugs they surfaced: `NODE_ENV=test`
+      defaulting, `RATE_LIMIT_ENABLED="on"` validation, token-bucket sweep-size math.
+- [x] **Integration hardening**: `global-setup` flushes Redis after migrate;
+      reusable `waitForEvent` / `resetRedis` / `resetAllState` helpers.
+- [x] **Race wall** (`integration/concurrency.test.ts`, 6 cases): duplicate submit
+      idempotency (two sockets, one player), simultaneous final submits (single
+      finish, exactly-one-finalize), 30-emit answer burst, 25-join burst,
+      identical-nickname fencing (10 concurrent → exactly one winner, 9 × 409),
+      nickname boundary (24 ok / 25 or blank 400). Every submitting test now
+      verifies the result is persisted (Polls `FINISHED` in PG) — no orphaned
+      finalize after teardown. Sockets are tracked and closed per test.
+- [x] **E2E hardening**: added hostile-network test (CDP `Network.emulateNetworkConditions`
+      offline drop → restore → reload → selection recovered → finish 1000 pts);
+      `retries` 1 → 2. E2E 4/4 green on the compose stack.
+- [x] **k6 correctness assertions**: ramp + deadline now assert ACTIVE-state
+      coherence, answer ack event integrity, and bounded complete scorecards /
+      leaderboard delivery via the `checks` metric, with a **binding**
+      `checks: rate>0.99` threshold — a load run that produces wrong results now
+      fails instead of "passing" on latency alone. Documented in
+      `docs/load-testing.md`.
+- [x] **CI**: unit+integration already covered by `npm test -w @quiz/api` (67
+      tests / 12 files green); added a full **E2E-on-compose job** (boots the
+      stack with `--wait`, migrates, runs Playwright, tears down).
+- [x] Gate: typecheck + unit (26) + integration (41) + E2E (4/4) all green.
+
 ---
 
 ## Milestone check-ins
@@ -232,6 +267,7 @@ available (VPS + git remote):
 2. After Phase 4 (all recovery tests green). — DONE (28 integration tests green)
 3. After load testing, before final report. — DONE (k6 smoke + E2E; full-scale deferred to staging)
 4. After Phase 9 (scale/CI gap-closure). — DONE (bounded load green at 100 VU; CI + k6 fixed)
+5. After Phase 9.5 (test hardening). — DONE (unit 26 + integration 41 + E2E 4/4 + k6 checks green)
 
 > Phase 5 gate also green: 32 integration tests (adds rate limiting + metrics + WS token buckets).
 > Phase 7 gate also green: E2E 2/2 + k6 smoke on raw Engine.IO framing + 32/6 integration + typecheck.

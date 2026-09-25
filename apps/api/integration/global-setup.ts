@@ -26,4 +26,17 @@ export default async function globalSetup(): Promise<void> {
       `Warning: prisma migrate deploy failed in global setup: ${(e as Error).message}\n`,
     );
   }
+
+  // Isolation: a stale Redis leaves rate-limit windows, live-game keys, and
+  // /metrics counters that bleed into later runs. Start every suite from the
+  // same clean slate as the DB.
+  try {
+    const { redis } = await import("../src/redis/client.js");
+    await redis.flushall();
+    process.stderr.write("[global-setup] Redis flushed\n");
+  } catch (e) {
+    process.stderr.write(
+      `Warning: redis flushall failed in global setup: ${(e as Error).message}\n`,
+    );
+  }
 }

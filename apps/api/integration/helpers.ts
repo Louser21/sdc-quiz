@@ -1,12 +1,24 @@
 import type { FastifyInstance } from "fastify";
 import type { LightMyRequestResponse } from "fastify";
 import type { Server as IoServer } from "socket.io";
+import type { Socket } from "socket.io-client";
 import { buildApp } from "../src/app.js";
 import { attachSockets } from "../src/sockets/index.js";
 import { setIo } from "../src/sockets/instance.js";
 
 export const TEST_SESSION_COOKIE = "quiz_session";
 export const TEST_PLAYER_COOKIE = "player_session";
+
+/** Resolve the next payload of `event` on a Socket.IO client socket. */
+export function waitForEvent<T>(socket: Socket, event: string, timeout = 15_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout waiting for ${event}`)), timeout);
+    socket.once(event, (payload: T) => {
+      clearTimeout(t);
+      resolve(payload);
+    });
+  });
+}
 
 export async function startTestApp(): Promise<FastifyInstance> {
   const app = await buildApp();
@@ -69,6 +81,18 @@ export async function resetDb(): Promise<void> {
   await prisma.$executeRawUnsafe(
     'TRUNCATE "Answer", "Player", "GameSession", "Quiz", "Question", "Option", "Session", "User" CASCADE;',
   );
+}
+
+/** Wipe all Redis state (live games, leaderboards, review frames, rate-limit windows). */
+export async function resetRedis(): Promise<void> {
+  const { redis } = await import("../src/redis/client.js");
+  await redis.flushall();
+}
+
+/** Wipe DB + Redis for full state isolation between tests. */
+export async function resetAllState(): Promise<void> {
+  await resetDb();
+  await resetRedis();
 }
 
 /** Create a published quiz with N questions (each 2 options, first correct). */

@@ -121,6 +121,13 @@ don't re-join the same game — the previous spin loop hit the join throttle.
 All thresholds green; answer-ack is effectively instant (Lua
 `player:set-answer` path) at these counts. Zero socket rate-limits.
 
+Since the bounded runs the `ramp` and `deadline` scenarios gained correctness
+assertions (the `checks` metric) plus a `checks: rate>0.99` threshold that is
+**binding**: every run must now prove that ACTIVE state is coherent, answers
+are acknowledged, and each scorecard/leaderboard is a bounded, complete result —
+a load test that completes with wrong answers or a broken leaderboard now fails
+the run instead of "passing" on latency alone.
+
 Full 100–1000 VU runs require staging hardware (local compose box is the
 platform's bottleneck, and the per-IP join throttle caps any single-host run);
 record them here with the table from "Metrics to record" when run.

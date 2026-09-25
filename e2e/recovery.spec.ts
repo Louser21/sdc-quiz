@@ -47,3 +47,60 @@ test("player refresh mid-paper restores answers and keeps the paper active", asy
     await hostCtx.close();
   }
 });
+
+test("player survives a hostile network drop (offline) and recovers", async ({
+  browser,
+}) => {
+  const NET_TITLE = "E2E Network Quiz";
+  const hostCtx = await browser.newContext();
+  const playerCtx = await browser.newContext();
+  const host = await hostCtx.newPage();
+  const player = await playerCtx.newPage();
+
+  try {
+    await registerHost(host);
+    await createPublishedQuiz(host, NET_TITLE);
+    const joinCode = await startQuizFromDashboard(host, NET_TITLE);
+    await joinAsPlayer(player, joinCode, "Mobile Player");
+
+    await host.getByRole("button", { name: /Start paper/ }).click();
+    await expect(player.getByRole("button", { name: "Submit paper" })).toBeVisible();
+
+    const paris = player.getByRole("button", { name: /Paris/ });
+    await paris.click();
+    await expect(paris).toHaveClass(/border-violet-500/);
+
+    // Simulate total radio loss (offline) — the socket dies mid-paper.
+    const cdp = await player.context().newCDPSession(player);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: true,
+      latency: 0,
+      downloadThroughput: 0,
+      uploadThroughput: 0,
+    });
+    await player.waitForTimeout(1500); // let the drop register server-side
+
+    // Back on a healthy network.
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 20,
+      downloadThroughput: 50_000_000,
+      uploadThroughput: 50_000_000,
+    });
+
+    // The cookie re-identifies the player; the server restores the selection.
+    await player.reload();
+    await expect(player.getByRole("button", { name: "Submit paper" })).toBeVisible();
+    const restored = player.getByRole("button", { name: /Paris/ });
+    await expect(restored).toHaveClass(/border-violet-500/);
+
+    await player.getByRole("button", { name: "Submit paper" }).click();
+    await player.getByRole("button", { name: "Submit", exact: true }).click();
+    await expect(player.getByText(`${NET_TITLE} is over!`)).toBeVisible();
+    await expect(player.getByText(/You finished #1 with 1000 points/)).toBeVisible();
+  } finally {
+    await playerCtx.close();
+    await hostCtx.close();
+  }
+});

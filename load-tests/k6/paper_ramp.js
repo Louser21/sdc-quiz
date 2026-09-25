@@ -7,7 +7,7 @@
 // starts the paper shortly into the ramp and keeps it ACTIVE through the peak.
 // Env overrides for bounded runs: PEAK (default 1000 VUs), HOLD (default 120s).
 import http from "k6/http";
-import { sleep } from "k6";
+import { check, sleep } from "k6";
 import {
   URL_BASE,
   seedHostAndGame,
@@ -32,6 +32,8 @@ export const options = {
     http_req_duration: ["p(95)<1000"],
     ws_connect_ms: ["p(95)<2000"],
     ws_answer_ack_ms: ["p(95)<1500"],
+    // Correctness budget: joins, scorecards and leaderboards must resolve.
+    checks: ["rate>0.99"],
   },
 };
 
@@ -63,6 +65,13 @@ export default function (seed) {
     "player:state": (state, s) => {
       if (state.phase === "ACTIVE" && !submitted) {
         metrics.sync_ready.add(Date.now() - tsync);
+        check(state, {
+          "ACTIVE state is coherent (1 question)": (p) =>
+            p.phase === "ACTIVE" &&
+            Array.isArray(p.questions) &&
+            p.questions.length === 1 &&
+            p.questions[0]?.options?.length >= 2,
+        });
         const q = state.questions[0];
         if (q) {
           tans = Date.now();
@@ -76,13 +85,25 @@ export default function (seed) {
     },
 
     "player:set-answer-ack": (ack, s) => {
+      check(ack, {
+        "answer accepted by server": (a) => a.accepted === true,
+      });
       if (!ack.accepted) return;
       metrics.answer.add(Date.now() - tans);
       tsub = Date.now();
       emit(s, "player:submit-paper", { gameId: joined.gameId });
     },
 
-    "player:scorecard": (_, s) => {
+    "player:scorecard": (sc, s) => {
+      check(sc, {
+        "scorecard is a bounded, complete result": (p) =>
+          p.submitted === true &&
+          p.totalQuestions === 1 &&
+          p.correctCount >= 0 &&
+          p.correctCount <= 1 &&
+          p.score >= 0 &&
+          p.score % 1000 === 0,
+      });
       metrics.submit.add(Date.now() - tsub);
       submitted = true;
       s.close();
