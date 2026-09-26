@@ -42,3 +42,5 @@ postgres-data/
 redis-data/
 # database backups
 backups/
+# prod-generated nginx conf (see scripts/gen-nginx-tls.sh)
+infra/nginx/*.generated.conf

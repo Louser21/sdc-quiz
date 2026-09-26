@@ -3,6 +3,10 @@ FROM node:22-slim AS build
 
 WORKDIR /app
 
+# Allow a larger build-time heap so `next build` survives 1 GiB hosts with swap.
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_OPTIONS=--max-old-space-size=2048
+
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json

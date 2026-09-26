@@ -5,6 +5,9 @@ FROM node:22-slim AS build
 
 WORKDIR /app
 
+# Cap the build heap; rely on host swap when the box has <2 GiB RAM.
+ENV NODE_OPTIONS=--max-old-space-size=1024
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*

@@ -259,6 +259,32 @@ Made the whole suite robust ("foolproof for most reasons"), per the owner's ask:
       stack with `--wait`, migrates, runs Playwright, tears down).
 - [x] Gate: typecheck + unit (26) + integration (41) + E2E (4/4) all green.
 
+## Phase 10 — Free-tier internet deploy (Azure, IN PROGRESS)
+
+Free, card-free hosting: **Azure for Students** (no card) → free B2pts v2 / B1s
+VM (1 GiB) + DuckDNS subdomain + Let's Encrypt. No app code changes; three new
+operator artifacts (all committed):
+
+- `docker-compose.prod.yml` — prod override: TLS nginx on 80/443 only; API /
+  Postgres / Redis not published to the host; 1 GiB memory budget
+  (postgres `shared_buffers=128MB`, `max_connections=50`; redis `maxmemory=128mb`;
+  `NODE_OPTIONS=--max-old-space-size=320` on api/web). Base nginx host port is
+  now `${NGINX_HTTP_PORT:-8080}` (dev default unchanged).
+- `scripts/deploy.sh` — bootstrap `.env` (real `SESSION_SECRET`,
+  `NODE_ENV=production`, `NGINX_HTTP_PORT=80`) → preflight (TLS conf + certs +
+  URLs) → start pg+redis → `prisma migrate deploy` → build+`up --wait` →
+  HTTPS health gate.
+- `scripts/swap-setup.sh` — 4 GiB swapfile + conservative sysctl (idempotent),
+  required before `next build` on a 1 GiB host.
+- `scripts/gen-nginx-tls.sh` — renders `infra/nginx/production.generated.conf`
+  (gitignored) from the TLS template. Dockerfiles cap build-time Node heaps
+  (web 2048 MiB, api 1024 MiB) for low-RAM VM builds.
+
+Status: artifacts validated (`compose config` merge OK: 80/443 only, no dev
+ports; `bash -n` clean). Azure VM up (public: 172.198.137.249, ssh `azureuser`).
+Next: VM bootstrapping (Docker, swap, DuckDNS cron, clone) → certbot → deploy →
+HTTPS handover → backups/runbook.
+
 ---
 
 ## Milestone check-ins

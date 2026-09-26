@@ -1,0 +1,80 @@
+# Production override for quiz-platform.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     --profile app up -d --build --wait
+#
+# Changes vs. the base stack:
+#   - nginx serves TLS (production.generated.conf) on host 80 + 443 only;
+#   - the API, Postgres and Redis are NOT published to the host (firewall or
+#     nothing to hit on 3001/5432/6380);
+#   - memory budget tuned for ~1 GiB hosts (Azure Free B1s/B2pts etc.).
+#
+# Prereqs (see deploy.sh / gen-nginx-tls.sh):
+#   - infra/nginx/production.generated.conf exists (gitignored)
+#   - /etc/letsencrypt/live/<vhost>/{fullchain.pem,privkey.pem} exist
+#   - .env sets NODE_ENV=production, PUBLIC_URL + FRONTEND_ORIGIN=https://<vhost>
+
+name: quiz-platform
+
+services:
+  postgres:
+    ports: !reset []
+    mem_limit: 512m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=4MB
+      - -c
+      - autovacuum_max_workers=2
+    restart: always
+
+  redis:
+    ports: !reset []
+    mem_limit: 192m
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "3600 1"
+    restart: always
+
+  api:
+    ports: !reset []
+    mem_limit: 512m
+    environment:
+      NODE_ENV: ${NODE_ENV:?set NODE_ENV=production in .env}
+      PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL=https://<your-vhost> in .env}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-${PUBLIC_URL}}
+      NODE_OPTIONS: --max-old-space-size=320
+    restart: always
+
+  web:
+    mem_limit: 512m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=320
+    restart: always
+
+  nginx:
+    # Base already maps ${NGINX_HTTP_PORT:-8080}:80; prod sets
+    # NGINX_HTTP_PORT=80 in .env so this yields 80:80 + 443:443.
+    ports:
+      - "443:443"
+    volumes:
+      - ./infra/nginx/production.generated.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: always
