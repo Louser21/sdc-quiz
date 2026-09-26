@@ -33,7 +33,7 @@ if [[ ! -f "$TEMPLATE" ]]; then
 fi
 
 awk -v vh="$VHOST" -v cf="$CERT_FILE" -v kf="$KEY_FILE" \
-  '{ gsub(/__SERVER_NAME__/, vh); gsub(/[${]CERT_FILE[}]/, cf); gsub(/[${]KEY_FILE[}]/, kf); print }' \
+  '{ gsub(/__SERVER_NAME__/, vh); gsub(/[$][{]CERT_FILE[}]/, cf); gsub(/[$][{]KEY_FILE[}]/, kf); print }' \
   "$TEMPLATE" > "$OUT"
 
 echo "[gen-nginx-tls] wrote $OUT"
@@ -41,7 +41,15 @@ echo "[gen-nginx-tls] vhost:     $VHOST"
 echo "[gen-nginx-tls] cert_file: $CERT_FILE"
 echo "[gen-nginx-tls] key_file:  $KEY_FILE"
 
-if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]]; then
-  echo "[gen-nginx-tls] WARNING: cert files missing on host."
-  echo "[gen-nginx-tls] nginx will fail to start until they exist (certbot)."
+if sudo -n true 2>/dev/null; then
+  # Passwordless sudo available -> we can actually read root-owned certs.
+  if ! sudo test -f "$CERT_FILE" || ! sudo test -f "$KEY_FILE"; then
+    echo "[gen-nginx-tls] WARNING: cert files missing on host."
+    echo "[gen-nginx-tls] nginx will fail to start until they exist (certbot)."
+  fi
+elif [[ ! -r "$CERT_FILE" || ! -r "$KEY_FILE" ]]; then
+  # No sudo; best-effort permissions check. Under /etc/letsencrypt this
+  # is expected to be unreadable as a non-root user -> warning is advisory.
+  echo "[gen-nginx-tls] WARNING: cert files not readable by $USER"
+  echo "[gen-nginx-tls] (expected under /etc/letsencrypt; verify with: sudo ls $(dirname "$CERT_FILE"))"
 fi
