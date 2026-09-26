@@ -25,7 +25,8 @@ export default function QuizEditorPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [timeLimitSeconds, setTimeLimitSeconds] = useState(600);
+  const [timeField, setTimeField] = useState("10");
+  const [timeError, setTimeError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [questions, setQuestions] = useState<EditorQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +43,7 @@ export default function QuizEditorPage() {
       const res = await api<{ quiz: QuizDetailDto }>(`/api/quizzes/${id}`);
       setTitle(res.quiz.title);
       setDescription(res.quiz.description ?? "");
-      setTimeLimitSeconds(res.quiz.timeLimitSeconds);
+      setTimeField(String(Math.round(res.quiz.timeLimitSeconds / 60)));
       setStatus(res.quiz.status);
       // Soft reload: adopt server truth without discarding local unsaved work.
       // Locally-dirty questions are kept as-is unless they were the very
@@ -83,12 +84,16 @@ export default function QuizEditorPage() {
   async function saveMeta(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    const mins = Number(timeField);
+    if (!Number.isInteger(mins) || mins < 1 || mins > 120) {
+      setTimeError("Total time must be a whole number between 1 and 120 minutes.");
+      return;
+    }
+    setTimeError(null);
+
     try {
-      const minutes = Number(timeLimitSeconds) / 60;
-      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 120) {
-        setError("Total time must be between 1 and 120 minutes");
-        return;
-      }
+      const timeLimitSeconds = mins * 60;
       await api(`/api/quizzes/${id}`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -256,15 +261,14 @@ export default function QuizEditorPage() {
             <Field label="Total time for the paper (minutes)">
               <Input
                 type="number"
-                min={1}
-                max={120}
                 step={1}
-                value={Math.round(timeLimitSeconds / 60)}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const mins = Number(e.target.value);
-                  setTimeLimitSeconds(Number.isFinite(mins) && mins > 0 ? Math.max(60, mins * 60) : 60);
+                value={timeField}
+                onChange={(e) => {
+                  setTimeField(e.target.value);
+                  if (timeError) setTimeError(null);
                 }}
               />
+              {timeError && <p className="text-xs text-red-500">{timeError}</p>}
               <p className="text-xs text-zinc-600">
                 Everyone gets this long to answer the whole paper (60 s – 120 min). Default 10 minutes.
               </p>

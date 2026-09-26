@@ -11,22 +11,29 @@ import { HostChrome } from "../../../components/chrome";
 export default function NewQuizPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [timeLimitMinutes, setTimeLimitMinutes] = useState(10);
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState("10");
+  const [timeError, setTimeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    const mins = Number(timeLimitMinutes);
+    if (!Number.isInteger(mins) || mins < 1 || mins > 120) {
+      setTimeError("Total time must be a whole number between 1 and 120 minutes.");
+      return;
+    }
+    setTimeError(null);
+
     setBusy(true);
     try {
       const res = await api<{ quiz: QuizSummaryDto }>("/api/quizzes", {
         method: "POST",
         body: JSON.stringify({
           title,
-          description: description || undefined,
-          timeLimitSeconds: timeLimitMinutes * 60,
+          timeLimitSeconds: mins * 60,
         }),
       });
       router.replace(`/quizzes/${res.quiz.id}/edit`);
@@ -54,23 +61,17 @@ export default function NewQuizPage() {
                 placeholder="History of the Internet"
               />
             </Field>
-            <Field label="Description (optional)">
-              <Input
-                value={description}
-                maxLength={280}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="JEE-Mains-style MCQ paper"
-              />
-            </Field>
             <Field label="Total time for the paper (minutes)">
               <Input
                 type="number"
-                min={1}
-                max={120}
                 step={1}
                 value={timeLimitMinutes}
-                onChange={(e) => setTimeLimitMinutes(Number(e.target.value) || 10)}
+                onChange={(e) => {
+                  setTimeLimitMinutes(e.target.value);
+                  if (timeError) setTimeError(null);
+                }}
               />
+              {timeError && <p className="text-xs text-red-500">{timeError}</p>}
               <p className="text-xs text-zinc-600">You can change this later in the editor.</p>
             </Field>
             <div className="flex gap-3">
