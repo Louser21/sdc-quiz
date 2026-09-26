@@ -19,7 +19,7 @@ export function getSocket(): QuizSocket {
     socket = io(origin, {
       path: "/socket.io",
       withCredentials: true,
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
     });
   }
   return socket;
