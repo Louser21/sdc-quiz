@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://sdc-quiz.duckdns.org/api/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://sdc-quiz.duckdns.org/socket.io/:path*"
+    }
+  ]
+}
